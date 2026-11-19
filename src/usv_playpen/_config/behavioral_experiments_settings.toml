@@ -6,6 +6,8 @@ avisoft_basedirectory = "C:\\Users\\FalknerLab\\Documents\\Avisoft Bioacoustics"
 avisoft_config_directory = "C:\\Users\\FalknerLab\\Documents\\Avisoft Bioacoustics\\Configurations\\RECORDER_USGH"
 coolterm_basedirectory = "D:\\CoolTerm"
 arduino_sync_port = "COM7"
+arduino_sync_logger = "auto"
+arduino_sync_baud_rate = 9600
 credentials_directory = "/Users/bmimica/Library/Application Support/usv_playpen/.credentials_Bartul"
 file_server = "cup"
 selected_labs = [ "falkner",]
@@ -27,6 +29,7 @@ drive_verify_timeout_s = 10
 ssh_connect_timeout_s = 10
 audio_move_timeout_min = 15
 backup_mirror_timeout_hours = 2
+arduino_sync_read_timeout_s = 0.5
 
 [[lab_shares]]
 name = "falkner"

@@ -10,7 +10,8 @@ public methods.
 
 Coverage: ``Synchronizer`` construction (defaults, required root directory),
 ``_build_led_px_dict``, ``find_lsb_changes`` (LSB and raw signals, the capacity
-limit), ``find_video_sync_trains`` (no video dir, LED pulse-train matching),
+limit), ``find_video_sync_trains`` (no video dir, LED pulse-train matching, a
+capture from the built-in serial logger),
 LED pixel gathering into a memmap, ``find_audio_sync_trains`` (missing JSON,
 cross-device mismatch warnings, tolerance and start-sample differences, dropped
 first / last audio and video pulses, shape-mismatch fallbacks, original-audio
@@ -334,6 +335,26 @@ def test_find_video_sync_trains_matches_led_pulse_train(tmp_path, processing_set
                                                        total_frame_number=n_frames)
     assert len(sync_seq) == 1
     assert any(Path(k).name == serial for k in sync_seq)   # keyed by camera dir
+    assert ipi_starts.size > 0
+
+
+def test_find_video_sync_trains_reads_builtin_logger_capture(tmp_path, processing_settings, mocker):
+    """A capture from usv-playpen's built-in serial logger (raw CRLF bytes, a
+    partial first line as in real CoolTerm captures, the logger's own file
+    name) is found and parsed like a CoolTerm capture."""
+    mocker.patch("usv_playpen.processing.synchronize_files.smart_wait")
+    serial = processing_settings["synchronize_files"]["Synchronizer"]["find_video_sync_trains"]["sync_camera_serial_num"][0]
+    n_frames = _write_video_sync_fixture(tmp_path, serial)
+    (tmp_path / "sync" / "CoolTerm Capture test.txt").unlink()
+    # the three lines the parser skips come first: a lone LF, a partial "2" and a full interval
+    (tmp_path / "sync" / "CoolTerm Capture (usv-playpen) 2026-11-19 10-15-00-123.txt").write_bytes(
+        b"\n2\r\n557\r\n" + b"300\r\n" * 4
+    )
+
+    sync = _make_sync(tmp_path, processing_settings)
+    ipi_starts, sync_seq = sync.find_video_sync_trains(camera_fps=[150.0],
+                                                       total_frame_number=n_frames)
+    assert len(sync_seq) == 1
     assert ipi_starts.size > 0
 
 

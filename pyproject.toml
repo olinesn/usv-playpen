@@ -54,6 +54,7 @@ dependencies = [
     "pyarrow",
     "pygam",
     "PyQt6",
+    "pyserial",
     "PyYAML",
     "sam-2",
     "scikit-image",
