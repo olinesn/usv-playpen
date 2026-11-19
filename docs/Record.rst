@@ -291,6 +291,10 @@ The ``[timeouts]`` table of the same file (not in the GUI) holds the time budget
     avisoft_warmup_s = 3
     avisoft_poll_interval_s = 3
     avisoft_max_wait_s = 12
+    avisoft_close_max_wait_s = 10
+    avisoft_helper_start_max_wait_s = 5
+    avisoft_helper_stop_max_wait_s = 5
+    avisoft_forced_stop_max_wait_s = 10
     drive_mount_max_retries = 3
     drive_verify_timeout_s = 10
     ssh_connect_timeout_s = 10
@@ -319,6 +323,18 @@ The ``[timeouts]`` table of the same file (not in the GUI) holds the time budget
      - seconds > 0
    * - :ref:`avisoft_max_wait_s <rec-timeouts-avisoft>`
      - ``12``
+     - seconds > 0
+   * - :ref:`avisoft_close_max_wait_s <rec-timeouts-avisoft-close>`
+     - ``10``
+     - seconds > 0
+   * - :ref:`avisoft_helper_start_max_wait_s <rec-timeouts-avisoft-helper>`
+     - ``5``
+     - seconds > 0
+   * - :ref:`avisoft_helper_stop_max_wait_s <rec-timeouts-avisoft-helper>`
+     - ``5``
+     - seconds > 0
+   * - :ref:`avisoft_forced_stop_max_wait_s <rec-timeouts-avisoft-forced-stop>`
+     - ``10``
      - seconds > 0
    * - :ref:`drive_mount_max_retries <rec-timeouts-drive-mount-max-retries>`
      - ``3``
@@ -358,6 +374,41 @@ The ``[timeouts]`` table of the same file (not in the GUI) holds the time budget
       * ``avisoft_max_wait_s`` — the budget within which byte growth must be seen, a positive number of seconds
    :Default: ``3`` / ``3`` / ``12``
    :Notes: a channel directory without growth aborts the recording.
+
+.. _rec-timeouts-avisoft-close:
+
+``avisoft_close_max_wait_s``
+   On Linux and macOS, how long (s) Avisoft RECORDER USGH, running under Wine, may take to close at the end of a recording before it is ended without asking (see :ref:`rec-avisoft-wine`).
+
+   :Options: a positive number of seconds
+   :Default: ``10``
+   :Notes: not used on Windows, where RECORDER is left as it always has been.
+
+.. _rec-timeouts-avisoft-helper:
+
+``avisoft_helper_start_max_wait_s`` / ``avisoft_helper_stop_max_wait_s``
+   On Linux and macOS, how long (s) *usbio-helper* may take to start listening before RECORDER USGH is started, and to exit once it is stopped (see :ref:`rec-avisoft-wine`).
+
+   :Options:
+      * ``avisoft_helper_start_max_wait_s`` — the start budget, a positive number of seconds
+      * ``avisoft_helper_stop_max_wait_s`` — the stop budget, a positive number of seconds; also how long a helper left running by an interrupted recording may take to free its port
+   :Default: ``5`` (start) and ``5`` (stop)
+   :Notes:
+      * a helper that does not listen within the start budget stops the recording before the cameras start, with the end of its log in the message.
+      * a helper still running past the stop budget is killed, and that is reported.
+      * not used on Windows.
+
+.. _rec-timeouts-avisoft-forced-stop:
+
+``avisoft_forced_stop_max_wait_s``
+   On Linux and macOS, how long (s) Wine's processes may take to end when RECORDER USGH is ended without asking (see :ref:`rec-avisoft-wine`).
+
+   :Options: a positive number of seconds
+   :Default: ``10``
+   :Notes:
+      * used when RECORDER does not close within ``avisoft_close_max_wait_s``, and before each start, when anything left in the Wine prefix by an interrupted recording is ended.
+      * a RECORDER still running past this budget has its whole process group ended.
+      * not used on Windows.
 
 .. _rec-timeouts-drive-mount-max-retries:
 
@@ -410,6 +461,125 @@ In the example below, one would be doing a 20 minute audio and video recording w
 
    <br>
 
+.. _rec-avisoft-wine:
+
+Avisoft RECORDER USGH on Linux and macOS
+----------------------------------------
+
+On Windows, *usv-playpen* starts Avisoft RECORDER USGH with PowerShell, as it always has. On Linux and macOS it runs the same Windows program under `Wine <https://www.winehq.org/>`_. The UltraSoundGate units are not USB audio devices: RECORDER drives them through Avisoft's own Windows driver, which Wine cannot load. *usbio-shim* stands in for that driver. It has two parts: a small DLL that RECORDER loads from its own folder, and *usbio-helper*, a native program that talks to the units over USB. Avisoft's files are not changed. Installing all of this is described in *Requirements*.
+
+.. note::
+
+   This has been tested with RECORDER USGH under Wine and simulated UltraSoundGate units, not yet with real units. The other Windows-only steps of a recording (the Ethernet switch, the file-server drives and the audio file moves) still run on Windows only.
+
+For each recording on Linux and macOS, *usv-playpen*:
+
+#. writes the base and config directories into *avisoft_config.ini* as RECORDER sees them under Wine (``Z:\...``, or ``C:\...`` inside the Wine prefix);
+#. ends any Wine program an interrupted recording left open in the prefix, and any *usbio-helper* it left running;
+#. starts *usbio-helper*, waits until it is ready, and starts RECORDER with the lab's configuration (``/CFG=avisoft_config.ini /AUT``), as on Windows;
+#. checks that the .wav files grow, as on Windows (:ref:`avisoft_warmup_s <rec-timeouts-avisoft>` and the two settings after it); if RECORDER cannot be started or does not record, the recording stops before the cameras start;
+#. once the recording time is up, asks RECORDER to close, as closing its window would (ending it after :ref:`avisoft_close_max_wait_s <rec-timeouts-avisoft-close>`), then stops *usbio-helper*.
+
+The text of any message box RECORDER shows (for example *UltraSoundGate hardware not found!*) is reported. *usbio-helper*'s output goes to *usbio-helper.log*, and Wine's to *rec_usgh-wine.log*, both in the Avisoft base directory and replaced at each recording.
+
+The three Avisoft directories of the GUI are local paths, with ASCII characters only (RECORDER reads them through *avisoft_config.ini*):
+
+* **Avisoft Recorder directory**: RECORDER's folder inside the Wine prefix, e.g. *~/.wine-avisoft/drive_c/Program Files (x86)/Avisoft Bioacoustics/RECORDER USGH* (with *~* written out)
+* **Avisoft base directory**: any local directory
+* **Avisoft config directory**: RECORDER's configuration folder inside the prefix, *drive_c/users/<user>/Documents/Avisoft Bioacoustics/Configurations/RECORDER_USGH*; it is created if missing
+
+The other settings, in *behavioral_experiments_settings.toml* (not in the GUI):
+
+.. code-block:: toml
+
+    avisoft_runner = "auto"
+    avisoft_wine_binary = "wine"
+    avisoft_wine_prefix = "~/.wine-avisoft"
+    avisoft_usbio_shim_directory = "~/usbio-shim/out"
+    avisoft_usbio_port = 47321
+    avisoft_usbio_device_order = []
+
+.. list-table::
+   :header-rows: 1
+   :widths: 44 16 40
+   :class: settings-glance
+
+   * - Setting
+     - Default
+     - Options
+   * - :ref:`avisoft_runner <rec-avisoft-runner>`
+     - ``'auto'``
+     - ``'auto'``, ``'native'``, ``'wine'``
+   * - :ref:`avisoft_wine_binary <rec-avisoft-wine-binary>`
+     - ``'wine'``
+     - a command name or path
+   * - :ref:`avisoft_wine_prefix <rec-avisoft-wine-prefix>`
+     - ``'~/.wine-avisoft'``
+     - path to a Wine prefix
+   * - :ref:`avisoft_usbio_shim_directory <rec-avisoft-usbio-shim-directory>`
+     - ``'~/usbio-shim/out'``
+     - path to a directory
+   * - :ref:`avisoft_usbio_port <rec-avisoft-usbio-port>`
+     - ``47321``
+     - a free TCP port
+   * - :ref:`avisoft_usbio_device_order <rec-avisoft-usbio-device-order>`
+     - ``[]``
+     - list of USB serial numbers
+
+.. _rec-avisoft-runner:
+
+``avisoft_runner``
+   How RECORDER USGH is started.
+
+   :Options:
+      * ``'auto'`` — PowerShell on Windows, Wine on Linux and macOS
+      * ``'native'`` — PowerShell; Windows only
+      * ``'wine'`` — Wine with *usbio-shim*; Linux and macOS only
+   :Default: ``'auto'``
+
+.. _rec-avisoft-wine-binary:
+
+``avisoft_wine_binary``
+   The ``wine`` command.
+
+   :Options: a command name found on the ``PATH``, or the full path to ``wine`` (e.g. for a Wine build unpacked outside the system); ``wineserver`` is looked for next to it, then on the ``PATH``
+   :Default: ``'wine'``
+
+.. _rec-avisoft-wine-prefix:
+
+``avisoft_wine_prefix``
+   The Wine prefix RECORDER USGH is installed in.
+
+   :Options: path to a Wine prefix (a leading *~* is expanded)
+   :Default: ``'~/.wine-avisoft'``
+   :Notes: keep it for RECORDER only: before each recording every Wine program running in it is ended.
+
+.. _rec-avisoft-usbio-shim-directory:
+
+``avisoft_usbio_shim_directory``
+   The directory holding the built *usbio-shim*: ``powrprof.dll`` and ``usbio-helper``.
+
+   :Options: path to a directory (a leading *~* is expanded)
+   :Default: ``'~/usbio-shim/out'``
+   :Notes: the DLL is copied next to *rec_usgh.exe* whenever it differs from the copy there.
+
+.. _rec-avisoft-usbio-port:
+
+``avisoft_usbio_port``
+   The TCP port on 127.0.0.1 that *usbio-helper* listens on and RECORDER connects to.
+
+   :Options: a TCP port no other program uses
+   :Default: ``47321``
+
+.. _rec-avisoft-usbio-device-order:
+
+``avisoft_usbio_device_order``
+   The USB serial numbers of the UltraSoundGate units, in the order RECORDER should see them. RECORDER treats the first as the main ("M") unit.
+
+   :Options: a list of serial numbers, as *usbio-helper.log* prints them when a unit is opened; ``[]`` orders the units by USB bus and port
+   :Default: ``[]``
+   :Notes: with ``[]`` the order holds as long as the units stay plugged into the same ports; check it as in *Common issues* below.
+
 Audio and video settings
 ------------------------
 
@@ -417,8 +587,8 @@ In the *Audio Settings* section, you can set certain parameters for the audio re
 
 * **USGH devices sync**: audio devices operate in SYNC mode or separately
 * **USGH devices sampling rate (Hz)**: the sampling rate of USGH devices (by default 250 000 Hz)
-* **CPU priority**: Windows option that regulates resource management based on the importance of the process
-* **CPU affinity**: Windows option that sets the CPU core on which the process will run
+* **CPU priority**: Windows option that regulates resource management based on the importance of the process; on Linux and macOS the closest *nice* value is given to RECORDER and *usbio-helper* (raising priority needs root or ``CAP_SYS_NICE``; if it is refused, that is reported and the recording goes on)
+* **CPU affinity**: Windows option that sets the CPU core on which the process will run; on Linux it is applied to RECORDER and *usbio-helper*, and macOS has no equivalent
 
 In the *Sync settings* section, you set the serial port of the Arduino that drives synchronization:
 

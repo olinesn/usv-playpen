@@ -14,6 +14,7 @@ import json
 import math
 import os
 import pathlib
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -39,14 +40,19 @@ from ..os_utils import (
 from ..send_email import Messenger
 from ..time_utils import is_gui_context, smart_wait
 from ..yaml_utils import SmartDumper, sync_equipment_dynamic_fields
+from .avisoft_wine import WineAvisoftRecorder, resolve_avisoft_runner, wine_windows_path
 
 
 def count_last_recording_dropouts(log_file_path: str,
-                                  log_file_ch : str) -> int | None:
+                                  log_file_ch : str,
+                                  log_directory_text: str | None = None) -> int | None:
     """
     Description
     -----------
     Reads a log file, identifies the last recording session, and counts the number of dropouts.
+
+    Avisoft starts each session in the log with the channel directory, as it
+    sees it, on a line of its own; the log is split there.
 
     Parameters
     ----------
@@ -55,6 +61,11 @@ def count_last_recording_dropouts(log_file_path: str,
     log_file_ch (str)
         The channel number for which the log file is being read (e.g., 'ch1').
         This is used to construct the full path to the log file.
+    log_directory_text (str | None)
+        The channel directory exactly as Avisoft writes it into the log,
+        trailing separator included. None (the default) means the local
+        path, which is what Avisoft writes on Windows; under Wine it writes the
+        Windows form of the path instead (e.g. ``Z:\\data\\avisoft\\ch1\\``).
 
     Returns
     -------
@@ -64,12 +75,15 @@ def count_last_recording_dropouts(log_file_path: str,
     """
 
     try:
-        with (pathlib.Path(log_file_path) / log_file_ch / f"{log_file_ch}.log").open() as log_txt_file:
+        with (pathlib.Path(log_file_path) / log_file_ch / f"{log_file_ch}.log").open(errors='replace') as log_txt_file:
             content = log_txt_file.read()
     except FileNotFoundError:
         return None
 
-    recordings = content.split(str(pathlib.Path(log_file_path) / log_file_ch) + os.sep)
+    if log_directory_text is None:
+        log_directory_text = str(pathlib.Path(log_file_path) / log_file_ch) + os.sep
+
+    recordings = content.split(log_directory_text)
 
     # filter out any empty strings that may result from the split
     recordings = [rec for rec in recordings if rec.strip()]
@@ -97,9 +111,10 @@ class ExperimentController:
     It holds ``exp_settings_dict`` (the behavioral-experiments settings),
     ``email_receivers``, ``metadata_settings`` (session metadata, an empty dict
     when None), ``message_output`` and ``app_context_bool`` (GUI vs. CLI
-    context), plus ``api``, ``camera_serial_num`` and ``config_1``, which start
-    as None and are filled during the run (camera API handle, camera serial
-    numbers, parsed Avisoft config). The entry methods are
+    context), plus ``api``, ``camera_serial_num``, ``config_1`` and
+    ``avisoft_wine``, which start as None and are filled during the run (camera
+    API handle, camera serial numbers, parsed Avisoft config, and RECORDER USGH
+    running under Wine on Linux and macOS). The entry methods are
     ``conduct_behavioral_recording`` and ``conduct_tracking_calibration``. It is
     constructed by the GUI (``usv_playpen_gui.py``) and by the command-line
     entry points of this module.
@@ -134,6 +149,7 @@ class ExperimentController:
         self.api = None
         self.camera_serial_num = None
         self.config_1 = None
+        self.avisoft_wine: WineAvisoftRecorder | None = None
 
         self.email_receivers = email_receivers
         self.exp_settings_dict = exp_settings_dict
@@ -368,6 +384,143 @@ class ExperimentController:
 
         self.message_output(f"[**Avisoft health check**] All {len(channel_dirs)} watched channel dir(s) are producing audio.")
         return True
+
+    def avisoft_runner(self) -> str:
+        """
+        Description
+        -----------
+        How Avisoft RECORDER USGH is started on this computer, from the
+        ``avisoft_runner`` setting (``'auto'`` when the setting is missing).
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        avisoft_runner (str)
+            ``'native'`` (PowerShell ``Start-Process``, Windows) or ``'wine'``
+            (Wine with usbio-shim, Linux and macOS).
+        """
+
+        avisoft_runner_setting = self.exp_settings_dict['avisoft_runner'] if 'avisoft_runner' in self.exp_settings_dict else 'auto'
+        return resolve_avisoft_runner(avisoft_runner_setting, platform.system())
+
+    def avisoft_ini_paths(self) -> tuple[str, str]:
+        """
+        Description
+        -----------
+        The ``basedirectory`` and ``configfilename`` values written into
+        avisoft_config.ini. On Windows these are the local paths, as before;
+        under Wine they are the same paths as RECORDER USGH sees them
+        (``Z:\\...``, or ``C:\\...`` inside the Wine prefix).
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        (basedirectory, configfilename) (tuple[str, str])
+            The base directory with a trailing separator, and the full path of
+            avisoft_config.ini in the config directory.
+        """
+
+        basedirectory = self.exp_settings_dict['avisoft_basedirectory']
+        config_file = pathlib.Path(self.exp_settings_dict['avisoft_config_directory']) / 'avisoft_config.ini'
+        if self.avisoft_runner() == 'native':
+            return f"{basedirectory!s}{os.sep}", str(config_file)
+
+        wine_prefix = self.exp_settings_dict['avisoft_wine_prefix']
+        wine_basedirectory = wine_windows_path(basedirectory, wine_prefix).rstrip('\\')
+        return f"{wine_basedirectory}\\", wine_windows_path(config_file, wine_prefix)
+
+    def start_avisoft_recorder_under_wine(self) -> str | None:
+        """
+        Description
+        -----------
+        Starts Avisoft RECORDER USGH under Wine, with usbio-shim standing in for
+        Avisoft's Windows driver (see ``recording/avisoft_wine.py``). The helper's
+        and Wine's logs go to ``avisoft_basedirectory``.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        start_error (str | None)
+            None once RECORDER has been started; otherwise why it could not be
+            (a missing piece of the installation, the helper not starting).
+        """
+
+        audio_settings = self.exp_settings_dict['audio']
+        timeouts = self.exp_settings_dict['timeouts']
+        self.avisoft_wine = WineAvisoftRecorder(
+            wine_binary=self.exp_settings_dict['avisoft_wine_binary'],
+            wine_prefix=self.exp_settings_dict['avisoft_wine_prefix'],
+            recorder_exe_directory=self.exp_settings_dict['avisoft_recorder_exe_directory'],
+            recorder_program_name=self.exp_settings_dict['avisoft_recorder_program_name'],
+            shim_directory=self.exp_settings_dict['avisoft_usbio_shim_directory'],
+            helper_port=self.exp_settings_dict['avisoft_usbio_port'],
+            device_order=self.exp_settings_dict['avisoft_usbio_device_order'],
+            log_directory=self.exp_settings_dict['avisoft_basedirectory'],
+            close_max_wait_s=timeouts['avisoft_close_max_wait_s'],
+            helper_start_max_wait_s=timeouts['avisoft_helper_start_max_wait_s'],
+            helper_stop_max_wait_s=timeouts['avisoft_helper_stop_max_wait_s'],
+            forced_stop_max_wait_s=timeouts['avisoft_forced_stop_max_wait_s'],
+            cpu_priority=audio_settings['cpu_priority'],
+            cpu_affinity=audio_settings['cpu_affinity'])
+
+        try:
+            notes = self.avisoft_wine.start()
+        except (OSError, RuntimeError, ValueError) as error:
+            return str(error)
+
+        for note in notes:
+            self.message_output(f"[**Avisoft under Wine**] {note}")
+        return None
+
+    def stop_avisoft_recorder(self, after_failure: bool = False) -> None:
+        """
+        Description
+        -----------
+        Stops Avisoft RECORDER USGH.
+
+        On Windows this ends it with PowerShell ``Stop-Process``, as the abort
+        path always has; it is called only when a recording is aborted.
+
+        Under Wine it asks RECORDER to close (and ends it if it does not within
+        ``timeouts.avisoft_close_max_wait_s``), stops usbio-helper, and reports
+        anything RECORDER showed in a message box. It is called at the end of
+        every recording, so the helper never outlives the session, and when a
+        recording is aborted.
+
+        Parameters
+        ----------
+        after_failure (bool)
+            Also report the end of the helper's log (when RECORDER failed to
+            start or to record).
+
+        Returns
+        -------
+        None
+        """
+
+        if self.avisoft_runner() == 'native':
+            avisoft_recorder_program_name = self.exp_settings_dict['avisoft_recorder_program_name']
+            subprocess.Popen(['powershell', '-Command', f"Stop-Process -Name '{avisoft_recorder_program_name}' -Force -ErrorAction SilentlyContinue"]).wait()
+            return
+
+        if self.avisoft_wine is None:
+            return
+
+        for event in self.avisoft_wine.stop():
+            self.message_output(f"[**Avisoft under Wine**] {event}")
+        for message_box_text in self.avisoft_wine.message_boxes():
+            self.message_output(f"[**Avisoft under Wine**] RECORDER USGH showed: {message_box_text}")
+        if after_failure:
+            helper_log_tail = self.avisoft_wine.log_tail()
+            if helper_log_tail:
+                self.message_output(f"[**Avisoft under Wine**] End of {self.avisoft_wine.helper_log_path}:\n{helper_log_tail}")
+        self.avisoft_wine = None
 
     def purge_cup_connections_on_windows(self) -> None:
         """
@@ -926,8 +1079,11 @@ class ExperimentController:
         self.config_1 = configparser.ConfigParser()
         self.config_1.read(pathlib.Path(__file__).parent.parent / '_config/avisoft_config.ini')
 
-        if f"{self.exp_settings_dict['avisoft_basedirectory']!s}{os.sep}" != self.config_1['Configuration']['basedirectory']:
-            self.config_1['Configuration']['basedirectory'] = f"{self.exp_settings_dict['avisoft_basedirectory']}{os.sep}"
+        # the paths as RECORDER USGH sees them: local on Windows, Z:\... under Wine
+        ini_basedirectory, ini_configfilename = self.avisoft_ini_paths()
+
+        if ini_basedirectory != self.config_1['Configuration']['basedirectory']:
+            self.config_1['Configuration']['basedirectory'] = ini_basedirectory
             changes += 1
 
         for mic_num in range(self.exp_settings_dict['audio']['total_mic_number']):
@@ -947,11 +1103,11 @@ class ExperimentController:
             self.config_1['MaxFileSize']['minutes'] = str(5.09)
             changes += 1
 
-        if self.config_1['Configuration']['configfilename'] != str(pathlib.Path(self.exp_settings_dict['avisoft_config_directory']) / 'avisoft_config.ini'):
-            self.config_1['Configuration']['configfilename'] = str(pathlib.Path(self.exp_settings_dict['avisoft_config_directory']) / 'avisoft_config.ini')
+        if self.config_1['Configuration']['configfilename'] != ini_configfilename:
+            self.config_1['Configuration']['configfilename'] = ini_configfilename
 
-        if self.config_1['Info']['configfilename'] != str(pathlib.Path(self.exp_settings_dict['avisoft_config_directory']) / 'avisoft_config.ini'):
-            self.config_1['Info']['configfilename'] = str(pathlib.Path(self.exp_settings_dict['avisoft_config_directory']) / 'avisoft_config.ini')
+        if self.config_1['Info']['configfilename'] != ini_configfilename:
+            self.config_1['Info']['configfilename'] = ini_configfilename
 
         for general_key in self.exp_settings_dict['audio']['general']:
             if str(self.exp_settings_dict['audio']['general'][general_key]) != self.config_1['Configuration'][general_key]:
@@ -1040,6 +1196,10 @@ class ExperimentController:
             self.message_output(f"{changes} lines changed in the avisoft_config_file!")
             with (pathlib.Path(__file__).parent.parent / '_config/avisoft_config.ini').open('w') as configfile:
                 self.config_1.write(configfile, space_around_delimiters=False)
+
+        # in a fresh Wine prefix RECORDER has not created its config directory yet
+        if self.avisoft_runner() == 'wine':
+            pathlib.Path(self.exp_settings_dict['avisoft_config_directory']).mkdir(parents=True, exist_ok=True)
 
         shutil.copy(src=pathlib.Path(__file__).parent.parent / '_config/avisoft_config.ini',
                     dst=pathlib.Path(self.exp_settings_dict['avisoft_config_directory']) / 'avisoft_config.ini')
@@ -1155,36 +1315,45 @@ class ExperimentController:
             # run command to start Avisoft Recorder and keep executing the rest of the script
             if (pathlib.Path(self.exp_settings_dict['avisoft_config_directory']) / 'avisoft_config.ini').exists():
 
-                # run Avisoft as Administrator
-                run_avisoft_command = f"Start-Process -FilePath '{avisoft_recorder_program_name}' -ArgumentList '/CFG=avisoft_config.ini', '/AUT' -Verb RunAs"
+                if self.avisoft_runner() == 'native':
+                    # run Avisoft as Administrator
+                    run_avisoft_command = f"Start-Process -FilePath '{avisoft_recorder_program_name}' -ArgumentList '/CFG=avisoft_config.ini', '/AUT' -Verb RunAs"
 
-                # add priority/affinity only if they exist
-                if cpu_priority or (affinity_arg and affinity_arg.strip()):
-                    run_avisoft_command += "; Start-Sleep 2; $proc = Get-Process 'rec_usgh' -ErrorAction SilentlyContinue; if ($proc) {"
+                    # add priority/affinity only if they exist
+                    if cpu_priority or (affinity_arg and affinity_arg.strip()):
+                        run_avisoft_command += "; Start-Sleep 2; $proc = Get-Process 'rec_usgh' -ErrorAction SilentlyContinue; if ($proc) {"
 
-                    if cpu_priority:
-                        run_avisoft_command += f" $proc.PriorityClass = '{cpu_priority}';"
+                        if cpu_priority:
+                            run_avisoft_command += f" $proc.PriorityClass = '{cpu_priority}';"
 
-                    if affinity_arg and affinity_arg.strip():
-                        run_avisoft_command += f" $proc.ProcessorAffinity = {affinity_arg};"
+                        if affinity_arg and affinity_arg.strip():
+                            run_avisoft_command += f" $proc.ProcessorAffinity = {affinity_arg};"
 
-                    run_avisoft_command += " }"
+                        run_avisoft_command += " }"
 
-                subprocess.Popen(args=f'''powershell -Command "{run_avisoft_command}"''', stdout=subprocess.PIPE, cwd=self.exp_settings_dict['avisoft_recorder_exe_directory'])
+                    subprocess.Popen(args=f'''powershell -Command "{run_avisoft_command}"''', stdout=subprocess.PIPE, cwd=self.exp_settings_dict['avisoft_recorder_exe_directory'])
+                    avisoft_start_error = None
+                else:
+                    # Linux and macOS: RECORDER USGH under Wine, with usbio-shim
+                    # standing in for Avisoft's Windows driver
+                    avisoft_start_error = self.start_avisoft_recorder_under_wine()
 
                 # Verify Avisoft is actually producing audio by watching the
                 # per-channel .wav files grow on disk. This replaces the old
                 # 'tasklist STATUS eq Not Responding' heuristic, which tracked
                 # only UI-thread responsiveness and missed audio-thread / USB
                 # freezes as well as modal-dialog hangs.
-                if not self.verify_avisoft_is_recording(
+                if avisoft_start_error is not None or not self.verify_avisoft_is_recording(
                         warmup_s=self.exp_settings_dict['timeouts']['avisoft_warmup_s'],
                         poll_interval_s=self.exp_settings_dict['timeouts']['avisoft_poll_interval_s'],
                         max_wait_s=self.exp_settings_dict['timeouts']['avisoft_max_wait_s']):
-                    subprocess.Popen(['powershell', '-Command', "Stop-Process -Name 'CoolTerm' -Force -ErrorAction SilentlyContinue"]).wait()
-                    subprocess.Popen(['powershell', '-Command', f"Stop-Process -Name '{avisoft_recorder_program_name}' -Force -ErrorAction SilentlyContinue"]).wait()
-                    self.message_output("Aborted experiment: Avisoft Recorder did not produce audio bytes after launch.")
-                    msg = "Aborted experiment: Avisoft Recorder did not produce audio bytes after launch."
+                    try:
+                        subprocess.Popen(['powershell', '-Command', "Stop-Process -Name 'CoolTerm' -Force -ErrorAction SilentlyContinue"]).wait()
+                    finally:
+                        self.stop_avisoft_recorder(after_failure=True)
+                    abort_reason = avisoft_start_error if avisoft_start_error is not None else "Avisoft Recorder did not produce audio bytes after launch."
+                    self.message_output(f"Aborted experiment: {abort_reason}")
+                    msg = f"Aborted experiment: {abort_reason}"
                     raise RuntimeError(msg)
 
         # record video data
@@ -1213,6 +1382,11 @@ class ExperimentController:
         # wait until cameras have finished recording
         # pause for N extra seconds so audio is done, too
         smart_wait(app_context_bool=self.app_context_bool, seconds=25 + (self.exp_settings_dict['video_session_duration'] * 60))
+
+        # under Wine, close RECORDER USGH and stop usbio-helper now that the audio
+        # is done (on Windows RECORDER is left as before)
+        if self.avisoft_wine is not None:
+            self.stop_avisoft_recorder()
 
         self.message_output(f"Recording fully completed at {datetime.datetime.now().hour:02d}:{datetime.datetime.now().minute:02d}:{datetime.datetime.now().second:02d}.")
 
@@ -1307,8 +1481,11 @@ class ExperimentController:
                                                         'duration_samples': 0, 'duration_seconds': 0, 'audio_tracking_diff_seconds': 0, 'num_dropouts': 0} for device in ['m', 's']}
 
             for log_ch, log_device in zip(['ch1', 'ch13'], ['m', 's'], strict=True):
+                # under Wine, RECORDER writes the channel directory into its log in Windows form
+                log_directory_text = f"{self.avisoft_ini_paths()[0]}{log_ch}\\" if self.avisoft_runner() == 'wine' else None
                 dropout_count = count_last_recording_dropouts(log_file_path=self.exp_settings_dict['avisoft_basedirectory'],
-                                                              log_file_ch=log_ch)
+                                                              log_file_ch=log_ch,
+                                                              log_directory_text=log_directory_text)
 
                 audio_triggerbox_sync_info_dict[log_device]['num_dropouts'] = dropout_count
 

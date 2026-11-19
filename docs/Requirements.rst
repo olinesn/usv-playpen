@@ -111,6 +111,31 @@ You can verify that the installation was successful by running the following com
    uv --version
 
 `Avisoft Recorder USGH <https://avisoft.com/downloads/>`_ works on Windows 11. You should download a version of the software that does not require an USB license key. There is a known issue that the configuration file can occasionally contain invalid settings that lead to various unexpected behaviors. This potential issue can be avoided by disabling the automatic saving of the configuration when the program is closed (*Options > Configuration management > Save mode on exit > Save current configuration automatically*).
+
+On Linux and macOS, *usv-playpen* runs RECORDER USGH under `Wine <https://www.winehq.org/>`_, with *usbio-shim* standing in for Avisoft's Windows driver (see :ref:`rec-avisoft-wine` in *Record*). This has not yet been tested with real UltraSoundGate units. To set it up:
+
+#. Install Wine 11 or newer, with its 32-bit support (*rec_usgh.exe* is a 32-bit program): on Ubuntu, WineHQ's ``winehq-stable`` package; on macOS, ``brew install --cask wine-stable``. Check it with ``wine --version``.
+#. Build *usbio-shim* as its README describes: the DLL needs the `zig <https://ziglang.org/>`_ compiler, and *usbio-helper* a C compiler and libusb 1.0 (``sudo apt install libusb-1.0-0-dev`` on Ubuntu, ``brew install libusb`` on macOS). Set ``avisoft_usbio_shim_directory`` to the directory the build writes ``powrprof.dll`` and ``usbio-helper`` to.
+#. Make a Wine prefix for RECORDER only (*usv-playpen* ends every Wine program running in it before a recording), and install RECORDER USGH into it. The downloaded installer is a self-extracting archive that holds *RECORDER USGH.msi*:
+
+   .. code-block:: bash
+
+      export WINEPREFIX=~/.wine-avisoft
+      wineboot -u
+      # a new prefix links Desktop, Documents, ... to your own folders; replace the links
+      # with plain folders so the installer's shortcuts stay inside the prefix
+      for d in Desktop Documents Downloads Music Pictures Videos Templates; do
+          link="$WINEPREFIX/drive_c/users/$USER/$d"
+          if [ -L "$link" ]; then unlink "$link"; mkdir "$link"; fi
+      done
+      mkdir recorder-installer && unzip RECORDER_USGH.exe -d recorder-installer
+      cd recorder-installer && WINEDLLOVERRIDES=winemenubuilder.exe=d wine msiexec /i "RECORDER USGH.msi" /qn
+
+   Avisoft's driver is staged by the installer but not used under Wine.
+
+#. On Linux, let your user open the units without root, once: copy *99-avisoft-ultrasoundgate.rules* from *usbio-shim* to */etc/udev/rules.d/*, run ``sudo udevadm control --reload && sudo udevadm trigger``, add yourself to the ``plugdev`` group (``sudo usermod -aG plugdev $USER``, then log out and back in) and plug the units in again. On macOS no such step is needed.
+#. Set ``avisoft_wine_prefix`` and the three Avisoft directories in *behavioral_experiments_settings.toml* (see :ref:`rec-avisoft-wine` in *Record*).
+
 `CoolTerm <https://coolterm.en.lo4d.com/windows>`_ is a serial port terminal application, which allows you to record and keep Arduino print statements in the form of a text file. In the *usv-playpen/_config* directory,
 you can find a CoolTerm configuration file, *coolterm_config.stc*, which you can import into CoolTerm. If you are setting CoolTerm up for the first time, it is best to unpack it in *D:\\CoolTerm* and further create two directories: *D:\\CoolTerm\\Connection_settings* (place the *coolterm_config.stc* file here) and *D:\\CoolTerm\\Data*. Open the config file in CoolTerm and ensure that the location of saved files is *D:\\CoolTerm\\Data* and not *D:\\CoolTerm*. An additional important point to consider is which port to set it to
 (by default it is set to COM7). If you are using the existing Arduino UNO, it is sufficient to plug it into a port (ideally COM7, which would require no changes to the CoolTerm configuration file), as the sketch was already uploaded. However,
