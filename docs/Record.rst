@@ -466,7 +466,7 @@ In the example below, one would be doing a 20 minute audio and video recording w
 Avisoft RECORDER USGH on Linux and macOS
 ----------------------------------------
 
-On Windows, *usv-playpen* starts Avisoft RECORDER USGH with PowerShell, as it always has. On Linux and macOS it runs the same Windows program under `Wine <https://www.winehq.org/>`_. The UltraSoundGate units are not USB audio devices: RECORDER drives them through Avisoft's own Windows driver, which Wine cannot load. *usbio-shim* stands in for that driver. It has two parts: a small DLL that RECORDER loads from its own folder, and *usbio-helper*, a native program that talks to the units over USB. Avisoft's files are not changed. Installing all of this is described in *Requirements*.
+On Windows, *usv-playpen* starts Avisoft RECORDER USGH with PowerShell, as it always has. On Linux and macOS it runs the same Windows program under `Wine <https://www.winehq.org/>`_. The UltraSoundGate units are not USB audio devices: RECORDER drives them through Avisoft's own Windows driver, which Wine cannot load. `usbio-shim <https://github.com/olinesn/usbio-shim>`_ stands in for that driver. It has two parts: a small DLL that RECORDER loads from its own folder, and *usbio-helper*, a native program that talks to the units over USB. Avisoft's files are not changed. Installing all of this is described in *Requirements*.
 
 .. note::
 
