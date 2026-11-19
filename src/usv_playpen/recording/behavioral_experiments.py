@@ -14,6 +14,7 @@ import json
 import math
 import os
 import pathlib
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -39,6 +40,7 @@ from ..os_utils import (
 from ..send_email import Messenger
 from ..time_utils import is_gui_context, smart_wait
 from ..yaml_utils import SmartDumper, sync_equipment_dynamic_fields
+from .sync_serial_logger import SerialSyncLogger, resolve_sync_logger
 
 
 def count_last_recording_dropouts(log_file_path: str,
@@ -99,7 +101,10 @@ class ExperimentController:
     when None), ``message_output`` and ``app_context_bool`` (GUI vs. CLI
     context), plus ``api``, ``camera_serial_num`` and ``config_1``, which start
     as None and are filled during the run (camera API handle, camera serial
-    numbers, parsed Avisoft config). The entry methods are
+    numbers, parsed Avisoft config), and ``sync_logger`` and
+    ``sync_serial_logger``, which name the program logging the sync Arduino
+    (``'coolterm'`` or ``'builtin'``) and hold the built-in logger while it
+    runs. The entry methods are
     ``conduct_behavioral_recording`` and ``conduct_tracking_calibration``. It is
     constructed by the GUI (``usv_playpen_gui.py``) and by the command-line
     entry points of this module.
@@ -134,6 +139,8 @@ class ExperimentController:
         self.api = None
         self.camera_serial_num = None
         self.config_1 = None
+        self.sync_logger: str | None = None
+        self.sync_serial_logger: SerialSyncLogger | None = None
 
         self.email_receivers = email_receivers
         self.exp_settings_dict = exp_settings_dict
@@ -1046,6 +1053,42 @@ class ExperimentController:
 
         smart_wait(app_context_bool=self.app_context_bool, seconds=2)
 
+    def stop_sync_capture(self) -> None:
+        """
+        Description
+        -----------
+        Stops logging the sync Arduino's serial output. With CoolTerm
+        (``sync_logger == 'coolterm'``) the CoolTerm process is closed, as
+        before; with the built-in logger, :class:`SerialSyncLogger` stops,
+        closes the port and the capture file, and every loss and reconnection
+        of the port during the recording is reported, as is a capture that
+        received nothing. Does nothing if no sync capture was started.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        None
+        """
+
+        if self.sync_logger == 'coolterm':
+            subprocess.Popen(['powershell', '-Command', "Stop-Process -Name 'CoolTerm' -Force -ErrorAction SilentlyContinue"]).wait()
+            return
+
+        if self.sync_serial_logger is None:
+            return
+
+        bytes_written = self.sync_serial_logger.stop_capture()
+        for sync_capture_event in self.sync_serial_logger.events:
+            self.message_output(f"[Sync capture] {sync_capture_event}.")
+        if bytes_written == 0:
+            self.message_output(f"[***Important!***] No sync pulses arrived from {self.sync_serial_logger.port}: "
+                                f"{self.sync_serial_logger.capture_file} is empty.")
+        else:
+            self.message_output(f"Sync capture stopped: {bytes_written} bytes written to {self.sync_serial_logger.capture_file}.")
+        self.sync_serial_logger = None
+
     def conduct_behavioral_recording(self) -> dict:
         """
         Description
@@ -1090,29 +1133,37 @@ class ExperimentController:
         # actually needs to happen.
         self.purge_cup_connections_on_windows()
 
-        # start capturing sync LEDS
-        coolterm_config_dst = pathlib.Path(self.exp_settings_dict['coolterm_basedirectory']) / 'Connection_settings' / 'coolterm_config.stc'
-        if not coolterm_config_dst.is_file():
-            shutil.copy(src=pathlib.Path(__file__).parent.parent / '_config' / 'coolterm_config.stc',
-                        dst=coolterm_config_dst)
+        # start capturing sync LEDS, with CoolTerm (Windows) or with the
+        # built-in serial logger, as arduino_sync_logger decides
+        if self.sync_serial_logger is not None:
+            # an earlier recording of this controller stopped before it
+            # stopped its sync capture: free the Arduino's port first
+            self.stop_sync_capture()
+        self.sync_logger = resolve_sync_logger(sync_logger_setting=self.exp_settings_dict['arduino_sync_logger'],
+                                               operating_system=platform.system())
+        if self.sync_logger == 'coolterm':
+            coolterm_config_dst = pathlib.Path(self.exp_settings_dict['coolterm_basedirectory']) / 'Connection_settings' / 'coolterm_config.stc'
+            if not coolterm_config_dst.is_file():
+                shutil.copy(src=pathlib.Path(__file__).parent.parent / '_config' / 'coolterm_config.stc',
+                            dst=coolterm_config_dst)
 
-        # Keep the destination .stc 'Port = ...' line in sync with the
-        # user-configured Arduino sync port (GUI / --set arduino_sync_port=...).
-        # Only the Port line is rewritten; every other line is preserved
-        # verbatim so locally-tweaked CoolTerm settings are not clobbered.
-        desired_sync_port = self.exp_settings_dict['arduino_sync_port']
-        with pathlib.Path(coolterm_config_dst).open() as stc_in:
-            stc_lines = stc_in.readlines()
-        rewrote_port = False
-        for line_idx, stc_line in enumerate(stc_lines):
-            if stc_line.lstrip().startswith('Port'):
-                stc_lines[line_idx] = f'Port = {desired_sync_port}\n'
-                rewrote_port = True
-                break
-        if not rewrote_port:
-            stc_lines.insert(0, f'Port = {desired_sync_port}\n')
-        with pathlib.Path(coolterm_config_dst).open('w') as stc_out:
-            stc_out.writelines(stc_lines)
+            # Keep the destination .stc 'Port = ...' line in sync with the
+            # user-configured Arduino sync port (GUI / --set arduino_sync_port=...).
+            # Only the Port line is rewritten; every other line is preserved
+            # verbatim so locally-tweaked CoolTerm settings are not clobbered.
+            desired_sync_port = self.exp_settings_dict['arduino_sync_port']
+            with pathlib.Path(coolterm_config_dst).open() as stc_in:
+                stc_lines = stc_in.readlines()
+            rewrote_port = False
+            for line_idx, stc_line in enumerate(stc_lines):
+                if stc_line.lstrip().startswith('Port'):
+                    stc_lines[line_idx] = f'Port = {desired_sync_port}\n'
+                    rewrote_port = True
+                    break
+            if not rewrote_port:
+                stc_lines.insert(0, f'Port = {desired_sync_port}\n')
+            with pathlib.Path(coolterm_config_dst).open('w') as stc_out:
+                stc_out.writelines(stc_lines)
 
         # Reconcile every dynamic Equipment field in the in-memory session
         # metadata against the live toml just before the per-session yaml
@@ -1124,12 +1175,20 @@ class ExperimentController:
         if self.metadata_settings:
             sync_equipment_dynamic_fields(self.metadata_settings, self.exp_settings_dict)
 
-        coolterm_config_path = str(coolterm_config_dst)
+        if self.sync_logger == 'coolterm':
+            coolterm_config_path = str(coolterm_config_dst)
 
-        subprocess.Popen(
-            args=['powershell', '-Command', f"Start-Process -FilePath '{coolterm_config_path}' -WindowStyle Minimized"],
-            stdout=subprocess.PIPE
-        )
+            subprocess.Popen(
+                args=['powershell', '-Command', f"Start-Process -FilePath '{coolterm_config_path}' -WindowStyle Minimized"],
+                stdout=subprocess.PIPE
+            )
+        else:
+            self.sync_serial_logger = SerialSyncLogger(port=self.exp_settings_dict['arduino_sync_port'],
+                                                       baud_rate=self.exp_settings_dict['arduino_sync_baud_rate'],
+                                                       capture_directory=pathlib.Path(self.exp_settings_dict['coolterm_basedirectory']) / 'Data',
+                                                       read_timeout_s=self.exp_settings_dict['timeouts']['arduino_sync_read_timeout_s'])
+            sync_capture_file = self.sync_serial_logger.start_capture()
+            self.message_output(f"Logging sync pulses from {self.exp_settings_dict['arduino_sync_port']} to {sync_capture_file}.")
 
         self.check_camera_vitals(camera_fr=self.exp_settings_dict['video']['general']['recording_frame_rate'])
 
@@ -1181,7 +1240,7 @@ class ExperimentController:
                         warmup_s=self.exp_settings_dict['timeouts']['avisoft_warmup_s'],
                         poll_interval_s=self.exp_settings_dict['timeouts']['avisoft_poll_interval_s'],
                         max_wait_s=self.exp_settings_dict['timeouts']['avisoft_max_wait_s']):
-                    subprocess.Popen(['powershell', '-Command', "Stop-Process -Name 'CoolTerm' -Force -ErrorAction SilentlyContinue"]).wait()
+                    self.stop_sync_capture()
                     subprocess.Popen(['powershell', '-Command', f"Stop-Process -Name '{avisoft_recorder_program_name}' -Force -ErrorAction SilentlyContinue"]).wait()
                     self.message_output("Aborted experiment: Avisoft Recorder did not produce audio bytes after launch.")
                     msg = "Aborted experiment: Avisoft Recorder did not produce audio bytes after launch."
@@ -1217,7 +1276,7 @@ class ExperimentController:
         self.message_output(f"Recording fully completed at {datetime.datetime.now().hour:02d}:{datetime.datetime.now().minute:02d}:{datetime.datetime.now().second:02d}.")
 
         # close serial monitor sync LED capture
-        subprocess.Popen(['powershell', '-Command', "Stop-Process -Name 'CoolTerm' -Force -ErrorAction SilentlyContinue"]).wait()
+        self.stop_sync_capture()
 
         if self.exp_settings_dict['disable_ethernet']:
 

@@ -216,7 +216,7 @@ On the next page, you can set some basic parameters:
 * **Avisoft Recorder directory** : this is the directory which contains the *rec_usgh.exe* file
 * **Avisoft base directory** : this is the local directory where the recordings will be saved
 * **Avisoft config directory** : this is the local directory where the Avisoft (the ultrasonic-audio software) config file is located (must be on C:\\ drive!)
-* **Coolterm directory** : this is the local directory where the Arduino serial terminal outputs will be saved
+* **Coolterm directory** : this is the local directory where the Arduino serial terminal outputs will be saved (in its *Data* subdirectory, by CoolTerm on Windows or by *usv-playpen*'s built-in logger on Linux and macOS; see *Sync settings* below)
 * **File destination(s) Linux** : these are the directories on both video PCs where the file server is mounted
 * **File destination(s) Windows** : these are the directories on the audio PC where the file server is mounted
 * **Conduct AUDIO recording** :  if *Yes*, the audio recording will be conducted; if *No*, only video will be recorded
@@ -296,6 +296,7 @@ The ``[timeouts]`` table of the same file (not in the GUI) holds the time budget
     ssh_connect_timeout_s = 10
     audio_move_timeout_min = 15
     backup_mirror_timeout_hours = 2
+    arduino_sync_read_timeout_s = 0.5
 
 .. list-table::
    :header-rows: 1
@@ -335,6 +336,9 @@ The ``[timeouts]`` table of the same file (not in the GUI) holds the time budget
    * - :ref:`backup_mirror_timeout_hours <rec-timeouts-backup-mirror-timeout-hours>`
      - ``2``
      - hours > 0
+   * - :ref:`arduino_sync_read_timeout_s <rec-timeouts-arduino-sync-read-timeout-s>`
+     - ``0.5``
+     - seconds > 0
 
 .. _rec-timeouts-ethernet-up:
 
@@ -400,6 +404,15 @@ The ``[timeouts]`` table of the same file (not in the GUI) holds the time budget
    :Options: a positive number of hours
    :Default: ``2``
 
+.. _rec-timeouts-arduino-sync-read-timeout-s:
+
+``arduino_sync_read_timeout_s``
+   How long (s) one read of the Arduino's port by the built-in sync logger waits for data.
+
+   :Options: a positive number of seconds
+   :Default: ``0.5``
+   :Notes: it bounds how long stopping the logger takes, and is the pause between attempts at reopening the port after the Arduino is unplugged. Not used with CoolTerm.
+
 In the example below, one would be doing a 20 minute audio and video recording without calibration. When ready, click *Next*:
 
 .. figure:: https://raw.githubusercontent.com/bartulem/usv-playpen/refs/heads/main/docs/media/recording_step_1.png
@@ -422,7 +435,67 @@ In the *Audio Settings* section, you can set certain parameters for the audio re
 
 In the *Sync settings* section, you set the serial port of the Arduino that drives synchronization:
 
-* **Arduino SYNC port**: the COM port the synchronization Arduino is connected to (default ``COM7``). This Arduino runs the ``src/usv_playpen/other/synchronization/generate_sync_pulses.ino`` sketch and emits the periodic transistor-transistor logic (TTL)/LED sync pulses (the SYNC LEDs the cameras see, plus the pulse train shared with the audio and National Instruments data acquisition (NIDQ)/electrophysiology (e-phys) streams) that let the processing step align audio, video, and e-phys in time. It must match the port the Arduino actually enumerates on -- and the port set in the CoolTerm serial terminal config (see *Requirements*).
+* **Arduino SYNC port**: the COM port the synchronization Arduino is connected to (default ``COM7``). This Arduino runs the ``src/usv_playpen/other/synchronization/generate_sync_pulses.ino`` sketch and emits the periodic transistor-transistor logic (TTL)/LED sync pulses (the SYNC LEDs the cameras see, plus the pulse train shared with the audio and National Instruments data acquisition (NIDQ)/electrophysiology (e-phys) streams) that let the processing step align audio, video, and e-phys in time. It must match the port the Arduino actually enumerates on; with CoolTerm, *usv-playpen* writes it into the CoolTerm serial terminal config before each recording (see *Requirements*).
+
+The Arduino prints each inter-pulse interval (ms) on its serial port, and a capture of that output, saved to the session's *sync* directory, is what the processing step matches the pulses against. On Windows this capture is made by CoolTerm, as it always was. On Linux and macOS *usv-playpen* makes it itself: during the recording it reads the Arduino's port and writes every byte it receives, unchanged, to *<Coolterm directory>/Data/CoolTerm Capture (usv-playpen) YYYY-MM-DD HH-MM-SS-mmm.txt*. That is the raw format and the file-name pattern of CoolTerm's captures with the lab's *coolterm_config.stc*, so the processing step reads both alike, and no serial terminal program has to be installed.
+
+The built-in logger stops the recording before the cameras start if it cannot open the port. If the Arduino is unplugged during the recording, it keeps trying to reopen the port and appends to the same file once the Arduino is back; the gap, and a capture that received nothing, are reported at the end of the recording. Opening the port restarts an Arduino Uno, as it does with CoolTerm: the pulses pause for about two seconds and resume with a new random sequence.
+
+Which program makes the capture, and the logger's port settings, are set in *behavioral_experiments_settings.toml* (not in the GUI):
+
+.. code-block:: toml
+
+    arduino_sync_port = "COM7"
+    arduino_sync_logger = "auto"
+    arduino_sync_baud_rate = 9600
+
+.. list-table::
+   :header-rows: 1
+   :widths: 44 16 40
+   :class: settings-glance
+
+   * - Setting
+     - Default
+     - Options
+   * - :ref:`arduino_sync_port <rec-sync-arduino-sync-port>`
+     - ``'COM7'``
+     - the Arduino's serial port name
+   * - :ref:`arduino_sync_logger <rec-sync-arduino-sync-logger>`
+     - ``'auto'``
+     - ``'auto'``, ``'coolterm'``, ``'builtin'``
+   * - :ref:`arduino_sync_baud_rate <rec-sync-arduino-sync-baud-rate>`
+     - ``9600``
+     - the sketch's baud rate (integer)
+
+.. _rec-sync-arduino-sync-port:
+
+``arduino_sync_port``
+   The serial port of the sync Arduino (the *Arduino SYNC port* field of the GUI).
+
+   :Options: the port as the operating system names it: ``COMn`` on Windows, ``/dev/ttyACM0`` (or the stable ``/dev/serial/by-id/usb-Arduino…-if00``, which does not change when other USB serial devices are plugged in) on Linux, ``/dev/cu.usbmodem…`` on macOS
+   :Default: ``'COM7'``
+   :Notes: on Linux the user running *usv-playpen* must be in the ``dialout`` group to open it (see *Requirements*).
+
+.. _rec-sync-arduino-sync-logger:
+
+``arduino_sync_logger``
+   Which program captures the Arduino's output during a recording.
+
+   :Options:
+      * ``'auto'`` — CoolTerm on Windows, the built-in logger on Linux and macOS
+      * ``'coolterm'`` — CoolTerm; Windows only (refused elsewhere, since *usv-playpen* starts CoolTerm through PowerShell)
+      * ``'builtin'`` — the built-in logger on any system, Windows included
+   :Default: ``'auto'``
+   :Notes: the ``Equipment`` block of the session metadata is not changed by this setting: on a rig using the built-in logger, set ``acquisition_software`` and ``software_version`` of ``[sync.LEDs]`` in *equipment.toml* to ``usv-playpen`` and its version, as you would the rig's other facts.
+
+.. _rec-sync-arduino-sync-baud-rate:
+
+``arduino_sync_baud_rate``
+   The baud rate the built-in logger opens the port with (8 data bits, no parity, 1 stop bit).
+
+   :Options: a positive integer equal to the ``Serial.begin`` rate of the sketch
+   :Default: ``9600`` (as in *generate_sync_pulses.ino*)
+   :Notes: CoolTerm reads its baud rate from *coolterm_config.stc* instead.
 
 In the *Video Settings* section, you can also set certain parameters for the video recording, while others (most notably, camera exposure time and gain) need to be set manually in the *behavioral_experiments_settings.toml* file. In the GUI, you can set the following parameters for the video recording:
 
@@ -616,7 +689,7 @@ Clicking *Next* saves all your settings to the */_config/behavioral_experiments_
 
    <br>
 
-The process starts with modifying the audio config file and enabling a CoolTerm process (the window will be minimized!). After this, the Avisoft Recorder should start within 10 seconds, and if it is working - a video recording will be initiated and ethernet will be disconnected during the chosen duration. You can monitor the video recording on another computer. When the time is up, video recording will stop, followed by audio recording, followed by CoolTerm. Ethernet will be reconnected and a file transfer procedure initiated. You will be notified when the file transfer procedure for the primary file server is completed.
+The process starts with modifying the audio config file and enabling a CoolTerm process (the window will be minimized!), or, on Linux and macOS, the built-in sync logger. After this, the Avisoft Recorder should start within 10 seconds, and if it is working - a video recording will be initiated and ethernet will be disconnected during the chosen duration. You can monitor the video recording on another computer. When the time is up, video recording will stop, followed by audio recording, followed by CoolTerm (or the built-in sync logger). Ethernet will be reconnected and a file transfer procedure initiated. You will be notified when the file transfer procedure for the primary file server is completed.
 
 Common issues
 -------------
