@@ -112,10 +112,10 @@ You can verify that the installation was successful by running the following com
 
 `Avisoft Recorder USGH <https://avisoft.com/downloads/>`_ works on Windows 11. You should download a version of the software that does not require an USB license key. There is a known issue that the configuration file can occasionally contain invalid settings that lead to various unexpected behaviors. This potential issue can be avoided by disabling the automatic saving of the configuration when the program is closed (*Options > Configuration management > Save mode on exit > Save current configuration automatically*).
 
-On Linux and macOS, *usv-playpen* runs RECORDER USGH under `Wine <https://www.winehq.org/>`_, with *usbio-shim* standing in for Avisoft's Windows driver (see :ref:`rec-avisoft-wine` in *Record*). This has not yet been tested with real UltraSoundGate units. To set it up:
+On Linux and macOS, *usv-playpen* runs RECORDER USGH under `Wine <https://www.winehq.org/>`_, with `usbio-shim <https://github.com/olinesn/usbio-shim>`_ standing in for Avisoft's Windows driver (see :ref:`rec-avisoft-wine` in *Record*). This has not yet been tested with real UltraSoundGate units. To set it up:
 
 #. Install Wine 11 or newer, with its 32-bit support (*rec_usgh.exe* is a 32-bit program): on Ubuntu, WineHQ's ``winehq-stable`` package; on macOS, ``brew install --cask wine-stable``. Check it with ``wine --version``.
-#. Build *usbio-shim* as its README describes: the DLL needs the `zig <https://ziglang.org/>`_ compiler, and *usbio-helper* a C compiler and libusb 1.0 (``sudo apt install libusb-1.0-0-dev`` on Ubuntu, ``brew install libusb`` on macOS). Set ``avisoft_usbio_shim_directory`` to the directory the build writes ``powrprof.dll`` and ``usbio-helper`` to.
+#. Get and build *usbio-shim*: ``git clone https://github.com/olinesn/usbio-shim ~/usbio-shim``, then ``cd ~/usbio-shim && ./build.sh``. The DLL needs the `zig <https://ziglang.org/>`_ compiler, and *usbio-helper* a C compiler and libusb 1.0 (``sudo apt install libusb-1.0-0-dev`` on Ubuntu, ``brew install libusb`` on macOS). The build writes ``powrprof.dll`` and ``usbio-helper`` to *~/usbio-shim/out*, which is the default ``avisoft_usbio_shim_directory``; if you build elsewhere, set it to that *out* directory.
 #. Make a Wine prefix for RECORDER only (*usv-playpen* ends every Wine program running in it before a recording), and install RECORDER USGH into it. The downloaded installer is a self-extracting archive that holds *RECORDER USGH.msi*:
 
    .. code-block:: bash
