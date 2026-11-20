@@ -93,7 +93,25 @@ while True:
 
 
 def _write_program(path: pathlib.Path, source: str) -> pathlib.Path:
-    """Writes a Python stand-in program run by this interpreter and makes it executable."""
+    """
+    Description
+    -----------
+    Writes a Python stand-in program, run by this test's interpreter, and makes
+    it executable.
+
+    Parameters
+    ----------
+    path (pathlib.Path)
+        Where the program is written; its folder is created if missing.
+    source (str)
+        The program's Python source, without the ``#!`` line.
+
+    Returns
+    -------
+    path (pathlib.Path)
+        The written program.
+    """
+
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"#!{sys.executable}\n{source}")
     path.chmod(0o755)
@@ -101,7 +119,20 @@ def _write_program(path: pathlib.Path, source: str) -> pathlib.Path:
 
 
 def _free_port() -> int:
-    """A TCP port on 127.0.0.1 that nothing listens on."""
+    """
+    Description
+    -----------
+    Finds a TCP port on 127.0.0.1 that nothing listens on.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    port (int)
+        The port.
+    """
+
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
         return probe.getsockname()[1]
@@ -165,7 +196,25 @@ def wine_rig(tmp_path, monkeypatch):
 
 
 def _read_json(path: pathlib.Path, timeout_s: float = 10.0) -> dict:
-    """Waits for a stand-in to write its JSON record, then returns it."""
+    """
+    Description
+    -----------
+    Waits for a stand-in program to write its JSON record, then reads it. Fails
+    the test if the record never appears.
+
+    Parameters
+    ----------
+    path (pathlib.Path)
+        The record the stand-in writes.
+    timeout_s (float)
+        How long (s) to wait for it.
+
+    Returns
+    -------
+    record (dict)
+        The parsed record.
+    """
+
     deadline = time.monotonic() + timeout_s
     while not path.is_file():
         if time.monotonic() > deadline:
@@ -181,7 +230,22 @@ def _read_json(path: pathlib.Path, timeout_s: float = 10.0) -> dict:
 
 
 def _port_is_listening(port: int) -> bool:
-    """Whether something accepts connections on 127.0.0.1:port."""
+    """
+    Description
+    -----------
+    Whether something accepts connections on a TCP port of 127.0.0.1.
+
+    Parameters
+    ----------
+    port (int)
+        The port.
+
+    Returns
+    -------
+    listening (bool)
+        True if a connection was accepted.
+    """
+
     try:
         with socket.create_connection(('127.0.0.1', port), timeout=1):
             return True
@@ -200,7 +264,7 @@ def _port_is_listening(port: int) -> bool:
     ('wine', 'Linux', 'wine'),
     ('wine', 'Darwin', 'wine'),
 ])
-def test_resolve_avisoft_runner(setting, system, expected):
+def test_resolve_avisoft_runner_keeps_windows_native_and_uses_wine_elsewhere(setting, system, expected):
     """'auto' keeps the Windows launch on Windows and picks Wine elsewhere; forced values pass through."""
     assert resolve_avisoft_runner(setting, system) == expected
 
@@ -212,7 +276,7 @@ def test_resolve_avisoft_runner(setting, system, expected):
     ('WINE', 'Linux', "must be 'auto', 'native' or 'wine'"),
     ('', 'Linux', "must be 'auto', 'native' or 'wine'"),
 ])
-def test_resolve_avisoft_runner_refuses(setting, system, match):
+def test_resolve_avisoft_runner_refuses_a_runner_the_system_cannot_use(setting, system, match):
     """A runner that cannot work on this system, or an unknown value, is refused with a reason."""
     with pytest.raises(ValueError, match=match):
         resolve_avisoft_runner(setting, system)
@@ -335,7 +399,7 @@ def test_install_shim_copies_only_when_the_dll_differs(wine_rig):
     assert installed.read_bytes() == b'MZ shim dll, rebuilt'
 
 
-def test_wine_environment(monkeypatch, tmp_path):
+def test_wine_environment_sets_prefix_shim_override_and_port(monkeypatch, tmp_path):
     """The prefix, the shim's DLL override (ahead of any the user set) and the port are set; a user's WINEDEBUG is kept."""
     monkeypatch.setenv('WINEDLLOVERRIDES', 'mscoree=d')
     monkeypatch.delenv('WINEDEBUG', raising=False)
@@ -354,7 +418,7 @@ def test_wine_environment(monkeypatch, tmp_path):
     assert recorder.wine_environment()['WINEDEBUG'] == '+relay'
 
 
-def test_commands(tmp_path):
+def test_commands_pass_port_device_order_and_lab_config(tmp_path):
     """The helper gets its port and the device order; RECORDER gets the lab's config and /AUT, as on Windows."""
     recorder = WineAvisoftRecorder(wine_binary='wine', wine_prefix=str(tmp_path), recorder_exe_directory=str(tmp_path),
                                    recorder_program_name='rec_usgh.exe', shim_directory=str(tmp_path / 'shim'),
@@ -530,7 +594,7 @@ def test_start_leaves_an_unrelated_process_named_in_a_stale_pid_file(wine_rig):
 
 
 @posix_only
-def test_scheduling_notes(wine_rig, monkeypatch):
+def test_scheduling_reports_what_it_cannot_apply(wine_rig, monkeypatch):
     """CPU priority and affinity are applied where possible and reported where not, never raised."""
     calls = []
     monkeypatch.setattr(aw_mod.os, 'setpriority', lambda _which, pid, nice: calls.append(('nice', pid, nice)), raising=False)

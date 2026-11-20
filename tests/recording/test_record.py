@@ -14,6 +14,12 @@ purge_cup_connections_on_windows; remount_cup_drives_on_windows;
 verify_avisoft_is_recording; check_camera_vitals; conduct_tracking_calibration;
 modify_audio_file; conduct_behavioral_recording (orchestration and the
 credential raise); and the conduct-calibration / conduct-recording CLIs.
+Avisoft RECORDER USGH under Wine (Linux and macOS): avisoft_runner and its
+default; modify_audio_file's Windows-form paths; the dropout count on a log
+written under Wine; start_avisoft_recorder_under_wine (a missing installation);
+stop_avisoft_recorder (what it reports); and, inside
+conduct_behavioral_recording, the Wine start failure, the stop after the
+recording, and RECORDER's Windows launch and abort commands, unchanged.
 """
 
 from __future__ import annotations
@@ -995,7 +1001,24 @@ def test_count_last_dropouts_reads_a_log_written_under_wine(tmp_path):
 
 
 def _audio_recording_settings(full_recording_settings):
-    """full_recording_settings with audio on and the Avisoft config in place, as after modify_audio_file."""
+    """
+    Description
+    -----------
+    Turns audio recording on in the ``full_recording_settings`` fixture, adds
+    the Avisoft health-check timeouts, and puts an ``avisoft_config.ini`` in the
+    config directory, as ``modify_audio_file`` would have.
+
+    Parameters
+    ----------
+    full_recording_settings (dict)
+        The fixture's settings dictionary; changed in place.
+
+    Returns
+    -------
+    settings (dict)
+        The same dictionary.
+    """
+
     settings = full_recording_settings
     settings['conduct_audio_recording'] = True
     # add to the fixture's timeouts rather than replacing them, so timeouts other steps read stay set
@@ -1008,7 +1031,30 @@ def _audio_recording_settings(full_recording_settings):
 
 
 def _patch_recording_dependencies(monkeypatch, mocker, tmp_path, *, verify_result):
-    """Mocks every subordinate step of conduct_behavioral_recording except the Avisoft launch."""
+    """
+    Description
+    -----------
+    Mocks every subordinate step of ``conduct_behavioral_recording`` except the
+    Avisoft launch: the network and drive steps, the camera API, the waits, the
+    e-mail and ``subprocess.Popen``.
+
+    Parameters
+    ----------
+    monkeypatch (pytest.MonkeyPatch)
+        The test's monkeypatch fixture.
+    mocker (pytest_mock.MockerFixture)
+        The test's mocker fixture.
+    tmp_path (pathlib.Path)
+        The test's temporary directory; the recording destinations go there.
+    verify_result (bool)
+        What the Avisoft health check returns.
+
+    Returns
+    -------
+    popen (unittest.mock.MagicMock)
+        The mock standing in for ``subprocess.Popen``, to read the commands from.
+    """
+
     for method_name in ('check_ethernet_connection', 'purge_cup_connections_on_windows',
                         'modify_audio_file', 'remount_cup_drives_on_windows'):
         monkeypatch.setattr(ExperimentController, method_name, lambda _self, *_a, **_kw: None)
@@ -1104,7 +1150,7 @@ def test_wine_avisoft_is_stopped_after_the_recording(mocker, monkeypatch, full_r
     assert [call['log_directory_text'] for call in dropout_calls] == [f"{base_windows}\\ch1\\", f"{base_windows}\\ch13\\"]
 
 
-def test_stop_avisoft_recorder_under_wine_reports(monkeypatch, controller):
+def test_stop_avisoft_recorder_under_wine_reports_events_boxes_and_helper_log(monkeypatch, controller):
     """Stopping under Wine reports what happened, what RECORDER showed, and after a failure the helper's log."""
     monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Linux')
     messages = []
