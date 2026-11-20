@@ -437,7 +437,7 @@ In the *Sync settings* section, you set the serial port of the Arduino that driv
 
 * **Arduino SYNC port**: the COM port the synchronization Arduino is connected to (default ``COM7``). This Arduino runs the ``src/usv_playpen/other/synchronization/generate_sync_pulses.ino`` sketch and emits the periodic transistor-transistor logic (TTL)/LED sync pulses (the SYNC LEDs the cameras see, plus the pulse train shared with the audio and National Instruments data acquisition (NIDQ)/electrophysiology (e-phys) streams) that let the processing step align audio, video, and e-phys in time. It must match the port the Arduino actually enumerates on; with CoolTerm, *usv-playpen* writes it into the CoolTerm serial terminal config before each recording (see *Requirements*).
 
-The Arduino prints each inter-pulse interval (ms) on its serial port, and a capture of that output, saved to the session's *sync* directory, is what the processing step matches the pulses against. On Windows this capture is made by CoolTerm, as it always was. On Linux and macOS *usv-playpen* makes it itself: during the recording it reads the Arduino's port and writes every byte it receives, unchanged, to *<Coolterm directory>/Data/CoolTerm Capture (usv-playpen) YYYY-MM-DD HH-MM-SS-mmm.txt*. That is the raw format and the file-name pattern of CoolTerm's captures with the lab's *coolterm_config.stc*, so the processing step reads both alike, and no serial terminal program has to be installed.
+The Arduino prints each inter-pulse interval (ms) on its serial port, and a capture of that output, saved to the session's *sync* directory, is what the processing step matches the pulses against. On Windows this capture is made by CoolTerm, as it always was. On Linux and macOS *usv-playpen* makes it itself: during the recording it reads the Arduino's port and writes every byte it receives, unchanged, to *<Coolterm directory>/Data/CoolTerm Capture (usv-playpen) YYYY-MM-DD HH-MM-SS-mmm.txt* (the start of the name is ``arduino_sync_capture_prefix``). That is the raw format and the file-name pattern of CoolTerm's captures with the lab's *coolterm_config.stc*, so the processing step reads both alike, and no serial terminal program has to be installed.
 
 The built-in logger stops the recording before the cameras start if it cannot open the port. If the Arduino is unplugged during the recording, it keeps trying to reopen the port and appends to the same file once the Arduino is back; the gap, and a capture that received nothing, are reported at the end of the recording. Opening the port restarts an Arduino Uno, as it does with CoolTerm: the pulses pause for about two seconds and resume with a new random sequence.
 
@@ -448,6 +448,7 @@ Which program makes the capture, and the logger's port settings, are set in *beh
     arduino_sync_port = "COM7"
     arduino_sync_logger = "auto"
     arduino_sync_baud_rate = 9600
+    arduino_sync_capture_prefix = "CoolTerm Capture (usv-playpen)"
 
 .. list-table::
    :header-rows: 1
@@ -466,6 +467,9 @@ Which program makes the capture, and the logger's port settings, are set in *beh
    * - :ref:`arduino_sync_baud_rate <rec-sync-arduino-sync-baud-rate>`
      - ``9600``
      - the sketch's baud rate (integer)
+   * - :ref:`arduino_sync_capture_prefix <rec-sync-arduino-sync-capture-prefix>`
+     - ``'CoolTerm Capture (usv-playpen)'``
+     - the start of the capture's file name (string containing ``CoolTerm``)
 
 .. _rec-sync-arduino-sync-port:
 
@@ -496,6 +500,15 @@ Which program makes the capture, and the logger's port settings, are set in *beh
    :Options: a positive integer equal to the ``Serial.begin`` rate of the sketch
    :Default: ``9600`` (as in *generate_sync_pulses.ino*)
    :Notes: CoolTerm reads its baud rate from *coolterm_config.stc* instead.
+
+.. _rec-sync-arduino-sync-capture-prefix:
+
+``arduino_sync_capture_prefix``
+   The start of the built-in logger's capture file name; the capture's start time (``YYYY-MM-DD HH-MM-SS-mmm``) and ``.txt`` are appended to it, as CoolTerm does.
+
+   :Options: a string that contains ``CoolTerm`` and is valid in a file name
+   :Default: ``'CoolTerm Capture (usv-playpen)'``
+   :Notes: the processing step finds the session's sync capture by the word ``CoolTerm`` in its name, so keep that word. CoolTerm names its own captures after its settings file instead.
 
 In the *Video Settings* section, you can also set certain parameters for the video recording, while others (most notably, camera exposure time and gain) need to be set manually in the *behavioral_experiments_settings.toml* file. In the GUI, you can set the following parameters for the video recording:
 

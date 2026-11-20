@@ -69,12 +69,13 @@ class SerialSyncLogger:
     line, which ``processing/synchronize_files.py`` reads as the ground-truth
     pulse train.
 
-    The file is named the way CoolTerm names its auto-capture files,
-    ``CoolTerm Capture (usv-playpen) YYYY-MM-DD HH-MM-SS-mmm.txt`` (local time
-    of the capture start), with ``usv-playpen`` where CoolTerm puts the name
-    of its settings file. The ``CoolTerm`` in the name is what
-    ``synchronize_files.py`` looks for, so sessions recorded with either
-    program are processed alike.
+    The file is named the way CoolTerm names its auto-capture files: the
+    ``arduino_sync_capture_prefix`` setting, then the local time of the
+    capture start, ``YYYY-MM-DD HH-MM-SS-mmm``, and ``.txt``. The shipped
+    prefix, ``CoolTerm Capture (usv-playpen)``, has ``usv-playpen`` where
+    CoolTerm puts the name of its settings file. The ``CoolTerm`` in the name
+    is what ``synchronize_files.py`` looks for, so sessions recorded with
+    either program are processed alike.
 
     The port is read on a background thread, and each chunk is flushed to disk
     as it arrives. If the port goes away during the recording (the Arduino is
@@ -89,6 +90,7 @@ class SerialSyncLogger:
     def __init__(self, port: str,
                  baud_rate: int,
                  capture_directory: str | pathlib.Path,
+                 capture_prefix: str,
                  read_timeout_s: float) -> None:
         """
         Description
@@ -109,6 +111,11 @@ class SerialSyncLogger:
         capture_directory (str | pathlib.Path)
             Absolute path of the local directory the capture file is written
             to; it is created if missing.
+        capture_prefix (str)
+            The start of the capture file's name (``arduino_sync_capture_prefix``);
+            the capture's start time and ``.txt`` are appended to it, as CoolTerm
+            does. ``synchronize_files.py`` finds the capture by the word
+            ``CoolTerm`` in its name.
         read_timeout_s (float)
             How long (s) one read of the port waits for data. It bounds how
             long :meth:`stop_capture` waits for the thread, and is the pause
@@ -122,6 +129,7 @@ class SerialSyncLogger:
         self.port = port
         self.baud_rate = baud_rate
         self.capture_directory = pathlib.Path(capture_directory)
+        self.capture_prefix = capture_prefix
         self.read_timeout_s = read_timeout_s
         self.capture_file: pathlib.Path | None = None
         self.bytes_written = 0
@@ -199,7 +207,7 @@ class SerialSyncLogger:
         capture_start = dt.datetime.now()
         capture_stamp = f"{capture_start:%Y-%m-%d %H-%M-%S}-{capture_start.microsecond // 1000:03d}"
         self.capture_directory.mkdir(parents=True, exist_ok=True)
-        self.capture_file = self.capture_directory / f"CoolTerm Capture (usv-playpen) {capture_stamp}.txt"
+        self.capture_file = self.capture_directory / f"{self.capture_prefix} {capture_stamp}.txt"
         self._capture_handle = self.capture_file.open('xb')
 
         self._reader_thread = threading.Thread(target=self._capture_loop,

@@ -972,6 +972,7 @@ def full_recording_settings(tmp_path):
         'arduino_sync_port': 'loop://',
         'arduino_sync_logger': 'builtin',
         'arduino_sync_baud_rate': 9600,
+        'arduino_sync_capture_prefix': 'CoolTerm Capture (usv-playpen)',
         'credentials_directory': str(creds_dir),
         'file_server': 'cup',
         'selected_labs': ['falkner'],

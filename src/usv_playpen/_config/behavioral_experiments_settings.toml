@@ -8,6 +8,7 @@ coolterm_basedirectory = "D:\\CoolTerm"
 arduino_sync_port = "COM7"
 arduino_sync_logger = "auto"
 arduino_sync_baud_rate = 9600
+arduino_sync_capture_prefix = "CoolTerm Capture (usv-playpen)"
 credentials_directory = "/Users/bmimica/Library/Application Support/usv_playpen/.credentials_Bartul"
 file_server = "cup"
 selected_labs = [ "falkner",]

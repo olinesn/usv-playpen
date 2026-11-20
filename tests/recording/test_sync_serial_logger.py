@@ -7,7 +7,7 @@ other), pyserial's ``loop://`` port, or a stand-in port object.
 
 Coverage: ``resolve_sync_logger`` (each setting on each operating system, a
 misspelled setting); ``SerialSyncLogger`` (byte-for-byte copies of real CoolTerm
-captures, the CoolTerm-style file name, an empty capture, exclusive use of the
+captures, the CoolTerm-style file name and its prefix setting, an empty capture, exclusive use of the
 port, reconnecting after the port is lost, a port that cannot be opened, a
 relative capture directory, starting twice, stopping twice).
 """
@@ -174,7 +174,7 @@ class TestCaptureFromFakeArduino:
         """The capture holds exactly the bytes the Arduino sent, CRLFs and a partial first line included, as CoolTerm's raw capture does."""
         arduino_fd, port_path = fake_arduino_port
         sent = REAL_CAPTURE_PARTIAL_START + REAL_CAPTURE_CLEAN_START
-        logger = SerialSyncLogger(port=port_path, baud_rate=9600, capture_directory=tmp_path / 'Data', read_timeout_s=0.05)
+        logger = SerialSyncLogger(port=port_path, baud_rate=9600, capture_directory=tmp_path / 'Data', capture_prefix='CoolTerm Capture (usv-playpen)', read_timeout_s=0.05)
         capture_file = logger.start_capture()
         # chunk borders fall inside numbers and inside CRLFs on purpose
         for chunk_start in range(0, len(sent), 7):
@@ -189,7 +189,7 @@ class TestCaptureFromFakeArduino:
     def test_capture_is_flushed_while_recording(self, fake_arduino_port, tmp_path):
         """Every line reaches the disk as it arrives, so a crash mid-recording loses nothing already received."""
         arduino_fd, port_path = fake_arduino_port
-        logger = SerialSyncLogger(port=port_path, baud_rate=9600, capture_directory=tmp_path, read_timeout_s=0.05)
+        logger = SerialSyncLogger(port=port_path, baud_rate=9600, capture_directory=tmp_path, capture_prefix='CoolTerm Capture (usv-playpen)', read_timeout_s=0.05)
         capture_file = logger.start_capture()
         os.write(arduino_fd, REAL_CAPTURE_CLEAN_START)
         _wait_until(lambda: capture_file.read_bytes() == REAL_CAPTURE_CLEAN_START)
@@ -198,9 +198,9 @@ class TestCaptureFromFakeArduino:
     def test_second_logger_cannot_share_the_port(self, fake_arduino_port, tmp_path):
         """Two readers of one port would each get part of the bytes, so a second open is refused."""
         _arduino_fd, port_path = fake_arduino_port
-        first = SerialSyncLogger(port=port_path, baud_rate=9600, capture_directory=tmp_path / 'a', read_timeout_s=0.05)
+        first = SerialSyncLogger(port=port_path, baud_rate=9600, capture_directory=tmp_path / 'a', capture_prefix='CoolTerm Capture (usv-playpen)', read_timeout_s=0.05)
         first.start_capture()
-        second = SerialSyncLogger(port=port_path, baud_rate=9600, capture_directory=tmp_path / 'b', read_timeout_s=0.05)
+        second = SerialSyncLogger(port=port_path, baud_rate=9600, capture_directory=tmp_path / 'b', capture_prefix='CoolTerm Capture (usv-playpen)', read_timeout_s=0.05)
         with pytest.raises(RuntimeError, match='arduino_sync_port'):
             second.start_capture()
         first.stop_capture()
@@ -210,10 +210,17 @@ class TestSerialSyncLogger:
 
     def test_capture_without_data_leaves_empty_file(self, tmp_path):
         """A silent Arduino yields an empty capture file and zero bytes, which the recording reports."""
-        logger = SerialSyncLogger(port='loop://', baud_rate=9600, capture_directory=tmp_path, read_timeout_s=0.02)
+        logger = SerialSyncLogger(port='loop://', baud_rate=9600, capture_directory=tmp_path, capture_prefix='CoolTerm Capture (usv-playpen)', read_timeout_s=0.02)
         capture_file = logger.start_capture()
         assert logger.stop_capture() == 0
         assert capture_file.read_bytes() == b''
+
+    def test_capture_file_name_starts_with_the_prefix_setting(self, tmp_path):
+        """The capture is named from arduino_sync_capture_prefix, so a rig can tell its captures apart while processing still finds 'CoolTerm'."""
+        logger = SerialSyncLogger(port='loop://', baud_rate=9600, capture_directory=tmp_path, capture_prefix='CoolTerm Capture (rig B)', read_timeout_s=0.02)
+        capture_file = logger.start_capture()
+        logger.stop_capture()
+        assert re.fullmatch(r'CoolTerm Capture \(rig B\) \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}-\d{3}\.txt', capture_file.name)
 
     def test_capture_reopens_lost_port_and_appends(self, monkeypatch, tmp_path):
         """An unplugged-and-replugged Arduino keeps writing into the same file, as CoolTerm's AutoReconnect does, and the gap is listed."""
@@ -231,7 +238,7 @@ class TestSerialSyncLogger:
             return next_port
 
         monkeypatch.setattr(ssl_mod.SerialSyncLogger, '_open_port', _open_next)
-        logger = SerialSyncLogger(port='/dev/ttyACM0', baud_rate=9600, capture_directory=tmp_path, read_timeout_s=0.01)
+        logger = SerialSyncLogger(port='/dev/ttyACM0', baud_rate=9600, capture_directory=tmp_path, capture_prefix='CoolTerm Capture (usv-playpen)', read_timeout_s=0.01)
         capture_file = logger.start_capture()
         _wait_until(lambda: logger.bytes_written == len(b'1223\r\n805\r\n1139\r\n'))
         logger.stop_capture()
@@ -242,7 +249,7 @@ class TestSerialSyncLogger:
 
     def test_unopenable_port_fails_before_capture(self, tmp_path):
         """A wrong arduino_sync_port is reported by its setting name, and no capture file is left behind."""
-        logger = SerialSyncLogger(port=str(tmp_path / 'no_such_port'), baud_rate=9600, capture_directory=tmp_path / 'Data', read_timeout_s=0.02)
+        logger = SerialSyncLogger(port=str(tmp_path / 'no_such_port'), baud_rate=9600, capture_directory=tmp_path / 'Data', capture_prefix='CoolTerm Capture (usv-playpen)', read_timeout_s=0.02)
         with pytest.raises(RuntimeError, match='arduino_sync_port'):
             logger.start_capture()
         assert not (tmp_path / 'Data').exists()
@@ -251,14 +258,14 @@ class TestSerialSyncLogger:
     def test_relative_capture_directory_refused(self, tmp_path, monkeypatch):
         """The shipped Windows directory (D:\\CoolTerm) is a relative path elsewhere; it must not create a stray folder."""
         monkeypatch.chdir(tmp_path)
-        logger = SerialSyncLogger(port='loop://', baud_rate=9600, capture_directory='D:\\CoolTerm/Data', read_timeout_s=0.02)
+        logger = SerialSyncLogger(port='loop://', baud_rate=9600, capture_directory='D:\\CoolTerm/Data', capture_prefix='CoolTerm Capture (usv-playpen)', read_timeout_s=0.02)
         with pytest.raises(ValueError, match='coolterm_basedirectory'):
             logger.start_capture()
         assert list(tmp_path.iterdir()) == []
 
     def test_start_twice_refused_and_stop_twice_harmless(self, tmp_path):
         """A running capture cannot be restarted, and stopping again (or before starting) does nothing."""
-        logger = SerialSyncLogger(port='loop://', baud_rate=9600, capture_directory=tmp_path, read_timeout_s=0.02)
+        logger = SerialSyncLogger(port='loop://', baud_rate=9600, capture_directory=tmp_path, capture_prefix='CoolTerm Capture (usv-playpen)', read_timeout_s=0.02)
         assert logger.stop_capture() == 0
         logger.start_capture()
         with pytest.raises(RuntimeError, match='already been started'):

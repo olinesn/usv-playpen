@@ -1186,6 +1186,7 @@ class ExperimentController:
             self.sync_serial_logger = SerialSyncLogger(port=self.exp_settings_dict['arduino_sync_port'],
                                                        baud_rate=self.exp_settings_dict['arduino_sync_baud_rate'],
                                                        capture_directory=pathlib.Path(self.exp_settings_dict['coolterm_basedirectory']) / 'Data',
+                                                       capture_prefix=self.exp_settings_dict['arduino_sync_capture_prefix'],
                                                        read_timeout_s=self.exp_settings_dict['timeouts']['arduino_sync_read_timeout_s'])
             sync_capture_file = self.sync_serial_logger.start_capture()
             self.message_output(f"Logging sync pulses from {self.exp_settings_dict['arduino_sync_port']} to {sync_capture_file}.")
