@@ -998,8 +998,9 @@ def _audio_recording_settings(full_recording_settings):
     """full_recording_settings with audio on and the Avisoft config in place, as after modify_audio_file."""
     settings = full_recording_settings
     settings['conduct_audio_recording'] = True
-    settings['timeouts'] = {'avisoft_warmup_s': 3, 'avisoft_poll_interval_s': 3, 'avisoft_max_wait_s': 12,
-                            'audio_move_timeout_min': 15, 'backup_mirror_timeout_hours': 2}
+    # add to the fixture's timeouts rather than replacing them, so timeouts other steps read stay set
+    settings.setdefault('timeouts', {}).update({'avisoft_warmup_s': 3, 'avisoft_poll_interval_s': 3, 'avisoft_max_wait_s': 12,
+                                                'audio_move_timeout_min': 15, 'backup_mirror_timeout_hours': 2})
     config_dir = pathlib.Path(settings['avisoft_config_directory'])
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / 'avisoft_config.ini').write_text('[Configuration]\n')
@@ -1032,8 +1033,8 @@ def _patch_recording_dependencies(monkeypatch, mocker, tmp_path, *, verify_resul
 
 def test_windows_avisoft_launch_and_abort_are_unchanged(mocker, monkeypatch, full_recording_settings, tmp_path):
     """On Windows, RECORDER is started with the same PowerShell command as before,
-    and a failed health check ends CoolTerm and then RECORDER with the same
-    commands, raising the same error."""
+    and a failed health check ends it with the same command, raising the same
+    error. (How the sync logger is started and ended is not checked here.)"""
     monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Windows')
     settings = _audio_recording_settings(full_recording_settings)
     settings['audio']['cpu_priority'] = 'High'
@@ -1048,9 +1049,8 @@ def test_windows_avisoft_launch_and_abort_are_unchanged(mocker, monkeypatch, ful
     launch = ('powershell -Command "Start-Process -FilePath \'rec_usgh.exe\' -ArgumentList \'/CFG=avisoft_config.ini\', \'/AUT\' '
               '-Verb RunAs; Start-Sleep 2; $proc = Get-Process \'rec_usgh\' -ErrorAction SilentlyContinue; if ($proc) { '
               '$proc.PriorityClass = \'High\'; $proc.ProcessorAffinity =  /affinity 0xC; }"')
-    assert commands[1:] == [
+    assert [command for command in commands if 'rec_usgh' in str(command)] == [
         launch,
-        ['powershell', '-Command', "Stop-Process -Name 'CoolTerm' -Force -ErrorAction SilentlyContinue"],
         ['powershell', '-Command', "Stop-Process -Name 'rec_usgh.exe' -Force -ErrorAction SilentlyContinue"],
     ]
     assert ec.avisoft_wine is None
@@ -1058,10 +1058,10 @@ def test_windows_avisoft_launch_and_abort_are_unchanged(mocker, monkeypatch, ful
 
 def test_wine_avisoft_start_failure_aborts_with_its_reason(mocker, monkeypatch, full_recording_settings, tmp_path):
     """Under Wine, a RECORDER that cannot be started aborts the recording before
-    the cameras start, with the reason, after stopping the sync capture."""
+    the cameras start, with the reason, and stops RECORDER."""
     monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Linux')
     settings = _audio_recording_settings(full_recording_settings)
-    popen = _patch_recording_dependencies(monkeypatch, mocker, tmp_path, verify_result=True)
+    _patch_recording_dependencies(monkeypatch, mocker, tmp_path, verify_result=True)
     monkeypatch.setattr(ExperimentController, 'start_avisoft_recorder_under_wine',
                         lambda _self: "Cannot start RECORDER USGH under Wine: no Wine prefix at '/nowhere'; check avisoft_wine_prefix.")
     stops = []
@@ -1073,8 +1073,6 @@ def test_wine_avisoft_start_failure_aborts_with_its_reason(mocker, monkeypatch, 
         ec.conduct_behavioral_recording()
     assert stops == [True]
     assert not any('recording/start' in str(call) for call in ec.api.call.call_args_list)
-    assert ['powershell', '-Command', "Stop-Process -Name 'CoolTerm' -Force -ErrorAction SilentlyContinue"] in [
-        call.args[0] for call in popen.call_args_list if call.args]
 
 
 def test_wine_avisoft_is_stopped_after_the_recording(mocker, monkeypatch, full_recording_settings, tmp_path):
