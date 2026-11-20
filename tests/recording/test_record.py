@@ -1081,7 +1081,7 @@ def test_conduct_behavioral_recording_keeps_coolterm_on_windows(mocker, monkeypa
     and stopped with Stop-Process; no built-in logger is created."""
     full_recording_settings['arduino_sync_logger'] = 'auto'
     full_recording_settings['arduino_sync_port'] = 'COM7'
-    monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Windows')
+    mocker.patch('usv_playpen.recording.behavioral_experiments.platform.system', return_value='Windows')
 
     for method_name in (
         'check_ethernet_connection',
@@ -1149,7 +1149,7 @@ def test_conduct_behavioral_recording_stops_sync_capture_when_avisoft_fails(mock
 
     Runs as Windows with the built-in logger opted into, so RECORDER takes its
     native PowerShell start and stop."""
-    monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Windows')
+    mocker.patch('usv_playpen.recording.behavioral_experiments.platform.system', return_value='Windows')
     full_recording_settings['conduct_audio_recording'] = True
     full_recording_settings['timeouts'].update({'avisoft_warmup_s': 3, 'avisoft_poll_interval_s': 3, 'avisoft_max_wait_s': 12})
     avisoft_config_dir = pathlib.Path(full_recording_settings['avisoft_config_directory'])
