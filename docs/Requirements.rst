@@ -116,6 +116,8 @@ you can find a CoolTerm configuration file, *coolterm_config.stc*, which you can
 (by default it is set to COM7). If you are using the existing Arduino UNO, it is sufficient to plug it into a port (ideally COM7, which would require no changes to the CoolTerm configuration file), as the sketch was already uploaded. However,
 if you want to upload the sketch to a different Arduino device, you will need to install the `Arduino IDE <https://www.arduino.cc/en/software/>`_, compile and upload the following sketch: *usv-playpen/src/usv_playpen/other/synchronization/generate_sync_pulses.ino*.
 
+CoolTerm is needed on Windows only. On Linux and macOS *usv-playpen* captures the Arduino's output itself (``arduino_sync_logger = "auto"``, see *Record*), so nothing has to be installed: set ``coolterm_basedirectory`` to a local directory (the capture goes to its *Data* subdirectory, created if missing) and ``arduino_sync_port`` to the Arduino's port. To find the port, list the serial devices before and after plugging the Arduino in: ``ls /dev/serial/by-id/`` on Linux (prefer that stable name to ``/dev/ttyACM0``, whose number changes with other USB serial devices) and ``ls /dev/cu.usbmodem*`` on macOS. On Linux the user running *usv-playpen* must be in the ``dialout`` group to open the port: run ``sudo usermod -aG dialout $USER`` once, then log out and back in. Close any serial monitor (e.g. the Arduino IDE's) before recording; the built-in logger takes the port for itself and refuses to start if another program holds it.
+
 To control Ethernet connection status from the command line (more on this in the *Record* section), one needs to run Powershell in administrator mode. To ensure Powershell is in administrator mode all the time:
 (1) find Windows PowerShell in windows search and pin it to task bar, (2) right-click on the icon in the task bar and right click again on Windows PowerShell, (3) in the Properties, go to
 advanced properties and select *run as administrator* and hit OK. When you open PowerShell, it should say administrator in the title bar. To check if you are in administrator mode, type *whoami* and hit enter.
@@ -252,7 +254,8 @@ touch. Grouped by role:
 
 - ``behavioral_experiments_settings.toml`` — the experiment-run settings: experimenter
   list + default, the Avisoft RECORDER and CoolTerm install paths, the Arduino sync COM
-  port, the credentials directory, file server, recording / calibration durations and the
+  port and which program captures its output (CoolTerm or the built-in logger), the
+  credentials directory, file server, recording / calibration durations and the
   Ethernet toggle. This is the main file to edit before recording.
 - ``equipment.toml`` — a description of the rig hardware / software (triggerbox, cameras,
   lenses, acquisition PCs, the Avisoft device). Update it to describe your own equipment.
@@ -260,7 +263,8 @@ touch. Grouped by role:
   Avisoft software and mirrored by *usv-playpen* to drive audio recording. Re-export it
   from Avisoft whenever you change microphone / recording settings.
 - ``coolterm_config.stc`` — the CoolTerm serial-terminal profile (COM port, 9600 baud …)
-  used to talk to the Arduino sync board.
+  used to talk to the Arduino sync board on Windows (the built-in logger used on Linux and
+  macOS does not read it).
 - ``calibrated_sample_rates_imec.ini`` / ``calibrated_sample_rates_nidq.ini`` — the
   measured true sample rates of each Neuropixels headstage (``imec``, ≈ 30 kHz keyed by
   probe serial) and NI-DAQ device (``nidq``). Replace these with your own calibration
