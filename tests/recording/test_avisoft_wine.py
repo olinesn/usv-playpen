@@ -25,6 +25,7 @@ import socket
 import subprocess
 import sys
 import time
+from typing import Any
 
 import pytest
 
@@ -135,7 +136,7 @@ def _free_port() -> int:
 
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
-        return probe.getsockname()[1]
+        return int(probe.getsockname()[1])
 
 
 @pytest.fixture
@@ -195,7 +196,7 @@ def wine_rig(tmp_path, monkeypatch):
         recorder.stop()
 
 
-def _read_json(path: pathlib.Path, timeout_s: float = 10.0) -> dict:
+def _read_json(path: pathlib.Path, timeout_s: float = 10.0) -> dict[str, Any]:
     """
     Description
     -----------
@@ -211,7 +212,7 @@ def _read_json(path: pathlib.Path, timeout_s: float = 10.0) -> dict:
 
     Returns
     -------
-    record (dict)
+    record (dict[str, Any])
         The parsed record.
     """
 
@@ -222,11 +223,13 @@ def _read_json(path: pathlib.Path, timeout_s: float = 10.0) -> dict:
         time.sleep(0.02)
     while True:
         try:
-            return json.loads(path.read_text())
+            record: dict[str, Any] = json.loads(path.read_text())
         except json.JSONDecodeError:
             if time.monotonic() > deadline:
                 raise
             time.sleep(0.02)
+        else:
+            return record
 
 
 def _port_is_listening(port: int) -> bool:

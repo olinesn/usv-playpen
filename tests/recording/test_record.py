@@ -31,6 +31,7 @@ import os
 import pathlib
 import shutil
 from email.message import EmailMessage
+from typing import Any
 from unittest.mock import MagicMock, mock_open
 
 import motifapi as _motifapi
@@ -38,6 +39,7 @@ import paramiko
 import pytest
 import toml as _toml
 from click.testing import CliRunner
+from pytest_mock import MockerFixture
 
 import usv_playpen.recording.behavioral_experiments as be_mod
 import usv_playpen.send_email as send_email_mod
@@ -951,7 +953,7 @@ def test_modify_audio_file_under_wine_writes_windows_paths(monkeypatch, tmp_path
     settings['video_session_duration'] = 5
 
     mocker.patch('usv_playpen.recording.behavioral_experiments.smart_wait')
-    out_messages = []
+    out_messages: list[str] = []
     ec = ExperimentController(exp_settings_dict=settings, message_output=out_messages.append)
     ec.modify_audio_file()
 
@@ -1000,7 +1002,7 @@ def test_count_last_dropouts_reads_a_log_written_under_wine(tmp_path):
     assert count_last_recording_dropouts(str(base), 'ch1') == 3
 
 
-def _audio_recording_settings(full_recording_settings):
+def _audio_recording_settings(full_recording_settings: dict[str, Any]) -> dict[str, Any]:
     """
     Description
     -----------
@@ -1010,12 +1012,12 @@ def _audio_recording_settings(full_recording_settings):
 
     Parameters
     ----------
-    full_recording_settings (dict)
+    full_recording_settings (dict[str, Any])
         The fixture's settings dictionary; changed in place.
 
     Returns
     -------
-    settings (dict)
+    settings (dict[str, Any])
         The same dictionary.
     """
 
@@ -1030,7 +1032,8 @@ def _audio_recording_settings(full_recording_settings):
     return settings
 
 
-def _patch_recording_dependencies(monkeypatch, mocker, tmp_path, *, verify_result):
+def _patch_recording_dependencies(monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture,
+                                  tmp_path: pathlib.Path, *, verify_result: bool) -> MagicMock:
     """
     Description
     -----------
@@ -1137,9 +1140,14 @@ def test_wine_avisoft_is_stopped_after_the_recording(mocker, monkeypatch, full_r
         self.avisoft_wine = fake_wine
 
     monkeypatch.setattr(ExperimentController, 'start_avisoft_recorder_under_wine', _start)
-    dropout_calls = []
-    monkeypatch.setattr(be_mod, 'count_last_recording_dropouts',
-                        lambda **kwargs: dropout_calls.append(kwargs) or 0)
+    dropout_calls: list[dict[str, Any]] = []
+
+    def _count_dropouts(**kwargs: Any) -> int:
+        """Stand in for the dropout count: record the call, report no dropouts."""
+        dropout_calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr(be_mod, 'count_last_recording_dropouts', _count_dropouts)
 
     ec = ExperimentController(exp_settings_dict=settings, metadata_settings={'Session': {}, 'Environment': {}})
     ec.conduct_behavioral_recording()
@@ -1153,7 +1161,7 @@ def test_wine_avisoft_is_stopped_after_the_recording(mocker, monkeypatch, full_r
 def test_stop_avisoft_recorder_under_wine_reports_events_boxes_and_helper_log(monkeypatch, controller):
     """Stopping under Wine reports what happened, what RECORDER showed, and after a failure the helper's log."""
     monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Linux')
-    messages = []
+    messages: list[str] = []
     controller.message_output = messages.append
     fake_wine = MagicMock()
     fake_wine.stop.return_value = ['RECORDER USGH did not close within 4 s of being asked; it was ended.']
