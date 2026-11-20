@@ -1497,6 +1497,58 @@ def wait_for_subprocesses(
     return status
 
 
+def environment_command(environment: str, program: list[str]) -> list[str]:
+    """
+    Description
+    -----------
+    Builds the command that runs a program installed in another Python environment
+    (DAS, Vocalocator), for ``subprocess`` with ``shell=False``.
+
+    ``environment`` is either:
+
+    * the NAME of a conda environment (e.g. ``das``): the program runs through
+      ``conda run --no-capture-output -n <name>``, with the conda executable from the
+      ``CONDA_EXE`` variable conda sets on activation, else ``conda`` on PATH; or
+    * the PATH of an environment folder (e.g. ``~/envs/das``): a uv / venv /
+      virtualenv folder or a conda / mamba / micromamba prefix. Its own copy of the
+      program is run directly, so no conda installation is needed:
+      ``<path>/bin/<program>`` on Linux and macOS; ``<path>\\Scripts\\<program>.exe``,
+      else ``<path>\\<program>.exe`` (a conda prefix's ``python.exe``), on Windows.
+
+    The value is read as a path when it contains a path separator (``/`` or ``\\``)
+    or starts with ``~``, which a conda environment name cannot.
+
+    Parameters
+    ----------
+    environment (str)
+        Conda environment name, or path of an environment folder.
+    program (list[str])
+        The program and its arguments, e.g. ``['das', 'predict', ...]`` or
+        ``['python', '-m', 'vocalocatorssl', ...]``.
+
+    Returns
+    -------
+    command (list[str])
+        The full argument list.
+    """
+
+    if not ("/" in environment or "\\" in environment or environment.startswith("~")):
+        conda_exe = (os.environ['CONDA_EXE'] if 'CONDA_EXE' in os.environ else 'conda')
+        return [conda_exe, 'run', '--no-capture-output', '-n', environment, *program]
+
+    environment_dir = pathlib.Path(environment).expanduser()
+    if platform.system() == "Windows":
+        candidates = [environment_dir / "Scripts" / f"{program[0]}.exe", environment_dir / f"{program[0]}.exe"]
+    else:
+        candidates = [environment_dir / "bin" / program[0]]
+    for candidate in candidates:
+        if candidate.is_file():
+            return [str(candidate), *program[1:]]
+    msg = (f"'{program[0]}' was not found in the environment folder {environment_dir} "
+           f"(looked for: {', '.join(str(candidate) for candidate in candidates)}).")
+    raise FileNotFoundError(msg)
+
+
 # Canonical column order of a session's ``*_usv_summary.csv`` -- the single source of
 # truth every step that writes the summary reorders to (order_usv_summary_columns), so
 # a column's position never depends on which step ran last. Six blocks:

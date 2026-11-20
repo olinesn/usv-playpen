@@ -14,8 +14,10 @@ mount-mapping table was introduced to fix (all-occurrence substring corruption,
 and the previously-unhandled `murthy` share).
 
 Coverage: path translation, experimenter re-keying, atomic_output_path, the glob
-helpers, the audio memmap lookup, the QLVM model-path helpers and
-wait_for_subprocesses (including that failures and timeouts name the command).
+helpers, the audio memmap lookup, the QLVM model-path helpers,
+wait_for_subprocesses (including that failures and timeouts name the command) and
+environment_command (a conda environment name, or an environment folder run without
+conda).
 """
 
 from __future__ import annotations
@@ -2051,3 +2053,55 @@ def test_vocal_flags_read_integer_zero_one_columns():
     assert os_utils.pure_squeak_mask(table.with_columns(pls.col("usv").cast(pls.Float64)), "s").to_list() == [False, False, True]
     with pytest.raises(ValueError, match="0 / 1"):
         os_utils.noise_mask(pls.DataFrame({"noise": [2, 0]}), "s")
+
+
+# environment_command
+
+def test_environment_command_runs_a_conda_name_through_conda_run(monkeypatch):
+    """A plain name is a conda environment: the program runs through `conda run -n <name>`,
+    with the conda executable conda put in CONDA_EXE, else `conda` on PATH."""
+    monkeypatch.setenv("CONDA_EXE", "/opt/miniforge3/bin/conda")
+    assert os_utils.environment_command("das", ["das", "predict", "a.wav"]) == [
+        "/opt/miniforge3/bin/conda", "run", "--no-capture-output", "-n", "das", "das", "predict", "a.wav"]
+    monkeypatch.delenv("CONDA_EXE")
+    assert os_utils.environment_command("vcl-ssl-ss", ["python", "-m", "vocalocatorssl"]) == [
+        "conda", "run", "--no-capture-output", "-n", "vcl-ssl-ss", "python", "-m", "vocalocatorssl"]
+
+
+@pytest.mark.parametrize("system", ["Linux", "Darwin"])
+def test_environment_command_runs_an_environment_folder_directly(tmp_path, as_os, monkeypatch, system):
+    """A path is an environment folder (venv or conda prefix): its own bin/<program> runs,
+    with no conda; `~` is expanded."""
+    as_os(system)
+    monkeypatch.delenv("CONDA_EXE", raising=False)
+    (tmp_path / "envs" / "das" / "bin").mkdir(parents=True)
+    (tmp_path / "envs" / "das" / "bin" / "das").write_text("")
+    (tmp_path / "envs" / "das" / "bin" / "python").write_text("")
+    das = str(tmp_path / "envs" / "das" / "bin" / "das")
+    assert os_utils.environment_command(str(tmp_path / "envs" / "das"), ["das", "predict", "a.wav"]) == [
+        das, "predict", "a.wav"]
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert os_utils.environment_command("~/envs/das", ["python", "-m", "vocalocatorssl"]) == [
+        str(tmp_path / "envs" / "das" / "bin" / "python"), "-m", "vocalocatorssl"]
+
+
+def test_environment_command_finds_windows_venv_and_conda_prefix_layouts(tmp_path, as_os):
+    """On Windows a venv keeps its programs in Scripts\\<program>.exe and a conda prefix keeps
+    python.exe at its top: both are found."""
+    as_os("Windows")
+    (tmp_path / "venv" / "Scripts").mkdir(parents=True)
+    (tmp_path / "venv" / "Scripts" / "das.exe").write_text("")
+    (tmp_path / "prefix").mkdir()
+    (tmp_path / "prefix" / "python.exe").write_text("")
+    assert os_utils.environment_command(str(tmp_path / "venv"), ["das", "predict"]) == [
+        str(tmp_path / "venv" / "Scripts" / "das.exe"), "predict"]
+    assert os_utils.environment_command(str(tmp_path / "prefix"), ["python", "-m", "vocalocator.assess"]) == [
+        str(tmp_path / "prefix" / "python.exe"), "-m", "vocalocator.assess"]
+
+
+def test_environment_command_fails_loud_when_the_folder_lacks_the_program(tmp_path, as_os):
+    """An environment folder without the program raises, naming the folder and where it looked,
+    instead of falling back to conda."""
+    as_os("Linux")
+    with pytest.raises(FileNotFoundError, match=r"'das' was not found in the environment folder .*bin/das"):
+        os_utils.environment_command(str(tmp_path), ["das", "predict"])

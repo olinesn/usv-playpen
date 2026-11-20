@@ -25,6 +25,7 @@ from tqdm import tqdm
 from ..os_utils import (
     atomic_output_path,
     configure_path,
+    environment_command,
     find_audio_mmap,
     first_match_or_raise,
     order_usv_summary_columns,
@@ -557,13 +558,12 @@ class FindMouseVocalizations:
             )
             smart_wait(app_context_bool=self.app_context_bool, seconds=1)
 
-            conda_exe = (os.environ['CONDA_EXE'] if 'CONDA_EXE' in os.environ else 'conda')
             clean_env = os.environ.copy()
             clean_env.pop('PYTHONHOME', None)
             inference_subp = subprocess.Popen(
-                args=[conda_exe, 'run', '--no-capture-output', '-n', das_conda_name, 'das', 'predict', one_file, model_base,
+                args=environment_command(das_conda_name, ['das', 'predict', str(one_file), model_base,
                       '--segment-thres', str(thresh), '--segment-minlen', str(min_len),
-                      '--segment-fillgap', str(fill_gap), '--save-format', str(save_format)],
+                      '--segment-fillgap', str(fill_gap), '--save-format', str(save_format)]),
                 cwd=hpss_dir,
                 env=clean_env,
                 stdout=subprocess.DEVNULL,
@@ -1337,16 +1337,15 @@ class FindMouseVocalizations:
         model_base = str(
             pathlib.Path(configure_path(das_params["das_model_directory"])) / das_params["model_name_base"]
         )
-        conda_exe = (os.environ["CONDA_EXE"] if "CONDA_EXE" in os.environ else "conda")
         clean_env = os.environ.copy()
         clean_env.pop("PYTHONHOME", None)
         snippet_subp = subprocess.Popen(
-            args=[conda_exe, "run", "--no-capture-output", "-n", das_params["das_conda_env_name"],
-                  "das", "predict", str(snippet_dir), model_base,
-                  "--segment-thres", str(das_params["segment_confidence_threshold"]),
-                  "--segment-minlen", str(das_params["segment_minlen"]),
-                  "--segment-fillgap", str(das_params["segment_fillgap"]),
-                  "--save-format", "csv"],
+            args=environment_command(das_params["das_conda_env_name"],
+                                     ["das", "predict", str(snippet_dir), model_base,
+                                      "--segment-thres", str(das_params["segment_confidence_threshold"]),
+                                      "--segment-minlen", str(das_params["segment_minlen"]),
+                                      "--segment-fillgap", str(das_params["segment_fillgap"]),
+                                      "--save-format", "csv"]),
             cwd=snippet_dir,
             env=clean_env,
             stdout=subprocess.DEVNULL,
