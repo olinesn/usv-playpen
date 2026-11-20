@@ -29,15 +29,6 @@ from usv_playpen.recording.sync_serial_logger import (
     resolve_sync_logger,
 )
 
-# The first bytes of two real CoolTerm captures (falkner/Bartul/Data, sessions
-# 20240307_160336 and 20260421_182605). The first started mid-line, as about a
-# third of the lab's captures do; synchronize_files.py skips the first three
-# lines for this reason.
-REAL_CAPTURE_PARTIAL_START = b'\n2\r\n557\r\n343\r\n423\r\n273\r\n1361\r\n492\r\n1296\r\n378\r\n'
-REAL_CAPTURE_CLEAN_START = b'1223\r\n805\r\n1139\r\n509\r\n1218\r\n880\r\n1194\r\n962\r\n'
-
-CAPTURE_NAME_PATTERN = re.compile(r'CoolTerm Capture \(usv-playpen\) \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}-\d{3}\.txt')
-
 
 def _wait_until(condition: Callable[[], bool], timeout_s: float = 5.0) -> None:
     """
@@ -123,11 +114,42 @@ class _StandInPort:
 
     @property
     def in_waiting(self) -> int:
-        """Bytes ready to read: the next chunk's length."""
+        """
+        Description
+        -----------
+        The number of bytes ready to read, as pyserial's ``in_waiting``: the
+        length of the next chunk, or 0 when none is left.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        in_waiting (int)
+            The length of the next chunk.
+        """
+
         return len(self.chunks[0]) if self.chunks else 0
 
     def read(self, _size: int) -> bytes:
-        """The next chunk, then a failure or nothing (after a short wait, as a read timeout)."""
+        """
+        Description
+        -----------
+        Hands out the next chunk whatever ``_size`` asks for. Once the chunks
+        are used up, it raises ``serial.SerialException`` (with ``fail_after``)
+        or waits briefly and returns nothing, as a read that timed out.
+
+        Parameters
+        ----------
+        _size (int)
+            The number of bytes asked for; ignored.
+
+        Returns
+        -------
+        chunk (bytes)
+            The next chunk, or ``b''``.
+        """
+
         if self.chunks:
             return self.chunks.pop(0)
         if self.fail_after:
@@ -137,7 +159,19 @@ class _StandInPort:
         return b''
 
     def close(self) -> None:
-        """Marks the port closed."""
+        """
+        Description
+        -----------
+        Marks the port closed, as pyserial's ``close``.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        None
+        """
+
         self.closed = True
 
 
@@ -170,10 +204,17 @@ class TestResolveSyncLogger:
 @pytest.mark.skipif(sys.platform == 'win32', reason='pseudo-terminals are POSIX-only')
 class TestCaptureFromFakeArduino:
 
+    # The first bytes of two real CoolTerm captures (falkner/Bartul/Data, sessions
+    # 20240307_160336 and 20260421_182605). The first started mid-line, as about a
+    # third of the lab's captures do; synchronize_files.py skips the first three
+    # lines for this reason.
+    real_capture_partial_start = b'\n2\r\n557\r\n343\r\n423\r\n273\r\n1361\r\n492\r\n1296\r\n378\r\n'
+    real_capture_clean_start = b'1223\r\n805\r\n1139\r\n509\r\n1218\r\n880\r\n1194\r\n962\r\n'
+
     def test_capture_matches_sent_bytes_exactly(self, fake_arduino_port, tmp_path):
         """The capture holds exactly the bytes the Arduino sent, CRLFs and a partial first line included, as CoolTerm's raw capture does."""
         arduino_fd, port_path = fake_arduino_port
-        sent = REAL_CAPTURE_PARTIAL_START + REAL_CAPTURE_CLEAN_START
+        sent = self.real_capture_partial_start + self.real_capture_clean_start
         logger = SerialSyncLogger(port=port_path, baud_rate=9600, capture_directory=tmp_path / 'Data', capture_prefix='CoolTerm Capture (usv-playpen)', read_timeout_s=0.05)
         capture_file = logger.start_capture()
         # chunk borders fall inside numbers and inside CRLFs on purpose
@@ -183,7 +224,7 @@ class TestCaptureFromFakeArduino:
         assert logger.stop_capture() == len(sent)
         assert capture_file.read_bytes() == sent
         assert capture_file.parent == tmp_path / 'Data'
-        assert CAPTURE_NAME_PATTERN.fullmatch(capture_file.name)
+        assert re.fullmatch(r'CoolTerm Capture \(usv-playpen\) \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}-\d{3}\.txt', capture_file.name)
         assert logger.events == []
 
     def test_capture_is_flushed_while_recording(self, fake_arduino_port, tmp_path):
@@ -191,8 +232,8 @@ class TestCaptureFromFakeArduino:
         arduino_fd, port_path = fake_arduino_port
         logger = SerialSyncLogger(port=port_path, baud_rate=9600, capture_directory=tmp_path, capture_prefix='CoolTerm Capture (usv-playpen)', read_timeout_s=0.05)
         capture_file = logger.start_capture()
-        os.write(arduino_fd, REAL_CAPTURE_CLEAN_START)
-        _wait_until(lambda: capture_file.read_bytes() == REAL_CAPTURE_CLEAN_START)
+        os.write(arduino_fd, self.real_capture_clean_start)
+        _wait_until(lambda: capture_file.read_bytes() == self.real_capture_clean_start)
         logger.stop_capture()
 
     def test_second_logger_cannot_share_the_port(self, fake_arduino_port, tmp_path):
