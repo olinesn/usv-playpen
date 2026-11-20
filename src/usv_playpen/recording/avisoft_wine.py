@@ -414,13 +414,14 @@ class WineAvisoftRecorder:
         environment = dict(os.environ)
         environment['WINEPREFIX'] = str(self.wine_prefix)
         overrides = 'powrprof=n,b;winemenubuilder.exe=d'
-        if environment.get('WINEDLLOVERRIDES'):
+        if 'WINEDLLOVERRIDES' in environment and environment['WINEDLLOVERRIDES']:
             overrides = f"{overrides};{environment['WINEDLLOVERRIDES']}"
         environment['WINEDLLOVERRIDES'] = overrides
         environment['USBIO_SHIM_PORT'] = str(self.helper_port)
         # unless the environment sets one: Wine's own messages off, except the
         # text of every message box, so RECORDER's error boxes reach the log
-        environment.setdefault('WINEDEBUG', '-all,+msgbox')
+        if 'WINEDEBUG' not in environment:
+            environment['WINEDEBUG'] = '-all,+msgbox'
         return environment
 
     def helper_command(self) -> list[str]:
