@@ -2193,9 +2193,12 @@ The */usv-playpen/_parameter_settings/processing_settings.json* file contains a 
 .. _proc-das-command-line-inference-das-conda-env-name:
 
 ``das_conda_env_name``
-   Name of the local conda environment used for running DAS inference.
+   Name of the local conda environment used for running DAS inference, or the path of an
+   environment folder (a uv / venv folder, or a conda / mamba / micromamba prefix) whose own
+   ``das`` is then run directly, without conda.
 
-   :Options: any string naming a local conda environment that has DAS installed
+   :Options: any string naming a local conda environment that has DAS installed, or a path
+      (containing ``/`` or ``\``, or starting with ``~``) of an environment folder that has it
    :Default: ``"das"``
    :Notes: settings / CLI only; not exposed in the GUI.
 
@@ -2924,9 +2927,12 @@ The */usv-playpen/_parameter_settings/processing_settings.json* file contains a 
 .. _proc-vocalocator-vcl-conda-env-name:
 
 ``vcl_conda_env_name``
-   Name of the local conda environment used for running Vocalocator.
+   Name of the local conda environment used for running Vocalocator, or the path of an
+   environment folder (a uv / venv folder, or a conda / mamba / micromamba prefix) whose own
+   ``python`` is then run directly, without conda.
 
-   :Options: any string naming a local conda environment that has Vocalocator installed
+   :Options: any string naming a local conda environment that has Vocalocator installed, or a
+      path (containing ``/`` or ``\``, or starting with ``~``) of an environment folder that has it
    :Default: ``"vcl-ssl-ss"``
    :Notes: settings / CLI only; not exposed in the GUI.
 

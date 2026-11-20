@@ -1319,7 +1319,7 @@ def translate_rotate_metric_cli(ctx, root_directory, **kwargs) -> None:
 
 @click.command(name="das-infer")
 @click.option('--root-directory', type=click.Path(exists=True, file_okay=False, dir_okay=True), required=True, help='Session root directory path.')
-@click.option('--env-name', 'das_conda_env_name', type=str, default=None, required=False, help='Name of the DAS conda environment.')
+@click.option('--env-name', 'das_conda_env_name', type=str, default=None, required=False, help='Name of the DAS conda environment, or path of an environment folder (venv, conda prefix) to run DAS from without conda.')
 @click.option('--model-dir', 'das_model_directory', type=click.Path(exists=True, file_okay=False, dir_okay=True), default=None, required=False, help='Directory of the DAS model.')
 @click.option('--model-name', 'model_name_base', type=str, default=None, required=False, help='Base name of the DAS model.')
 @click.option('--output-type', 'output_file_type', type=click.Choice(['csv', 'h5'], case_sensitive=False), default=None, required=False, help='Output file type for DAS predictions.')
@@ -1551,7 +1551,7 @@ def prepare_vcl_assign_cli(root_directory, arena_directory) -> None:
 @click.command(name="vcl-assign")
 @click.option('--root-directory', type=click.Path(exists=True, file_okay=False, dir_okay=True), required=True, help='Session root directory path.')
 @click.option('--vcl-version', type=click.Choice(['vcl', 'vcl-ssl'], case_sensitive=False), default=None, required=False, help="Version of Vocalocator to use ('vcl' or 'vcl-ssl').")
-@click.option('--env-name', 'vcl_conda_env_name', type=str, default=None, required=False, help='Name of the Vocalocator conda environment.')
+@click.option('--env-name', 'vcl_conda_env_name', type=str, default=None, required=False, help='Name of the Vocalocator conda environment, or path of an environment folder (venv, conda prefix) to run it from without conda.')
 @click.option('--model-dir', 'vcl_model_directory', type=click.Path(exists=True, file_okay=False, dir_okay=True), default=None, required=False, help='Directory of the Vocalocator model.')
 @click.option('--temperature', 'temperature', type=float, default=None, required=False, help='Covariance temperature scaling for the 6D confidence sets (assign_vocalizations block).')
 @click.option('--grid-resolution', 'grid_resolution', nargs=2, type=int, default=None, required=False, help='Spatial (x_res, y_res) grid the confidence-set PDF is sampled on, e.g. --grid-resolution 100 100.')
