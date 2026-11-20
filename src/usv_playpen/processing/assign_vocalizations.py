@@ -20,6 +20,7 @@ from ..os_utils import (
     AUDIO_MMAP_BAND_FOLDERS,
     atomic_output_path,
     configure_path,
+    environment_command,
     find_audio_mmap,
     first_match_or_raise,
     order_usv_summary_columns,
@@ -329,11 +330,10 @@ class Vocalocator:
             label="USV summary CSV",
         )
 
-        conda_exe = (os.environ['CONDA_EXE'] if 'CONDA_EXE' in os.environ else 'conda')
         clean_env = os.environ.copy()
         clean_env.pop('PYTHONHOME', None)
-        assess_command = [conda_exe, 'run', '--no-capture-output', '-n', vcl_conda_name, 'python', '-m', 'vocalocator.assess',
-                          '--config', model_config_path, '--data', data_file_path, '--inference', '-o', output_file_path]
+        assess_command = environment_command(vcl_conda_name, ['python', '-m', 'vocalocator.assess',
+                                             '--config', model_config_path, '--data', data_file_path, '--inference', '-o', output_file_path])
         try:
             subprocess.run(
                 args=assess_command,
@@ -488,14 +488,13 @@ class Vocalocator:
                        f"{model_directory}, expected exactly one: {', '.join(f.name for f in calibration_files)}.")
                 raise ValueError(msg)
 
-            conda_exe = (os.environ['CONDA_EXE'] if 'CONDA_EXE' in os.environ else 'conda')
             clean_env = os.environ.copy()
             clean_env.pop('PYTHONHOME', None)
             subprocess_timeout_s = vocalocator_subprocess_timeout_s(self.input_parameter_dict)
             subprocess.run(
-                args=[conda_exe, 'run', '--no-capture-output', '-n', vcl_conda_name, 'python', '-m', 'vocalocatorssl',
+                args=environment_command(vcl_conda_name, ['python', '-m', 'vocalocatorssl',
                       '--data', str(data_file_path), '--save-path', model_directory, '--predict',
-                      '-o', str(data_file_path / 'model_predictions.npz')],
+                      '-o', str(data_file_path / 'model_predictions.npz')]),
                 cwd=model_directory,
                 env=clean_env,
                 shell=False,
@@ -503,9 +502,9 @@ class Vocalocator:
                 timeout=subprocess_timeout_s,
             )
             subprocess.run(
-                args=[conda_exe, 'run', '--no-capture-output', '-n', vcl_conda_name, 'python', '-m', 'vocalocatorssl.assign',
+                args=environment_command(vcl_conda_name, ['python', '-m', 'vocalocatorssl.assign',
                       str(data_file_path / 'model_predictions.npz'),
-                      '--calibration-results', str(pathlib.Path(model_directory) / cal_file)],
+                      '--calibration-results', str(pathlib.Path(model_directory) / cal_file)]),
                 cwd=model_directory,
                 env=clean_env,
                 shell=False,

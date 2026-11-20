@@ -77,6 +77,50 @@ activate-pni
 uv sync
 ```
 
+### Linux with an AMD GPU (ROCm)
+
+`uv sync` installs the NVIDIA (CUDA) build of PyTorch on Linux, so on a machine
+with an AMD GPU usv-playpen's own PyTorch steps (the squeak detector, the video
+models) run on the CPU. To use the AMD GPU, build a second environment,
+`.venv-rocm`, with the same package versions as `uv.lock` but PyTorch built for
+ROCm:
+
+```bash
+bash scripts/setup_rocm_venv.sh
+echo 'alias activate-pni="source /path/.../usv-playpen/.venv-rocm/bin/activate"' >> ~/.bashrc
+source ~/.bashrc
+activate-pni
+```
+
+Run the script again instead of `uv sync` after every `git pull` or version
+checkout, and run commands (`usv-playpen`, `pytest`, the CLI tools) from the
+activated environment rather than through `uv run`, which uses `.venv`.
+PyTorch's ROCm build brings its own ROCm libraries. JAX stays on the CPU, as
+after `uv sync`; `USV_PLAYPEN_JAX_ROCM=1 bash scripts/setup_rocm_venv.sh` also
+installs JAX's ROCm plugin, which needs ROCm 7 under `/opt/rocm` and works in a
+process only if `torch` is imported before `jax` (see the script's header).
+
+DAS and Vocalocator run in environments of their own. To run them on the AMD
+GPU, build those with PyTorch's ROCm build too, and give usv-playpen their
+folders instead of conda environment names (`das_conda_env_name` and
+`vcl_conda_env_name` in `processing_settings.json`, or `--env-name` on the
+command line; a value with a `/` is taken as a folder):
+
+```bash
+rocm=https://download.pytorch.org/whl/rocm7.2
+uv venv --python 3.13 ~/envs/das-rocm
+uv pip install --python ~/envs/das-rocm/bin/python --index-url $rocm torch==2.11.0+rocm7.2
+uv pip install --python ~/envs/das-rocm/bin/python das==0.33.2
+
+git clone https://github.com/Aramist/vocalocator-ssl.git ~/envs/vocalocator-ssl
+uv venv --python 3.13 ~/envs/vcl-rocm
+uv pip install --python ~/envs/vcl-rocm/bin/python --index-url $rocm torch==2.11.0+rocm7.2 torchaudio==2.11.0+rocm7.2
+uv pip install --python ~/envs/vcl-rocm/bin/python -e ~/envs/vocalocator-ssl
+```
+
+DAS 0.33 runs on Keras 3 with PyTorch and reads models trained with the
+TensorFlow versions (0.32 and earlier).
+
 ### Updating to a specific version
 
 Navigate to the cloned repository. To see which version you currently have:

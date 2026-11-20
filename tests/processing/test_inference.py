@@ -8,7 +8,7 @@ call and provide synthetic disk fixtures so the orchestration logic itself can
 be exercised without any external software installed.
 
 Coverage: FindMouseVocalizations construction, DAS command-line inference (one
-subprocess per wav), summarize_das_findings (no annotations, unknown or excluded
+subprocess per wav, through conda or from an environment folder), summarize_das_findings (no annotations, unknown or excluded
 channels, merge across channels, quality gates, the summary CSV and histogram,
 the atomic write, the long-interval refusal), the cross-channel merge, the
 consensus re-merge, the seam-ladder repair, prepare_for_vocalocator (animal-id
@@ -178,6 +178,38 @@ def test_das_command_line_inference_creates_save_dir_even_if_no_annotations(
     fmv.das_command_line_inference()
 
     assert (tmp_path / "audio" / "das_annotations").is_dir()
+
+
+def test_das_command_line_inference_runs_das_from_an_environment_folder(processing_settings,
+                                                                        tmp_path, mocker):
+    """With das_conda_env_name set to an environment folder (a venv or conda prefix), DAS
+    inference runs that folder's own `das predict` directly, with no `conda run`."""
+    hpss_dir = tmp_path / "audio" / "hpss_filtered"
+    hpss_dir.mkdir(parents=True)
+    (hpss_dir / "ch1.wav").write_bytes(b"\x00")
+    das_env = tmp_path / "envs" / "das"
+    (das_env / "bin").mkdir(parents=True)
+    (das_env / "bin" / "das").write_text("")
+    processing_settings["usv_inference"]["FindMouseVocalizations"]["das_command_line_inference"][
+        "das_conda_env_name"] = str(das_env)
+
+    mocker.patch("usv_playpen.os_utils.platform.system", return_value="Linux")
+    popen_mock = mocker.patch("usv_playpen.processing.das_inference.subprocess.Popen",
+                              return_value=MagicMock(returncode=0))
+    mocker.patch("usv_playpen.processing.das_inference.wait_for_subprocesses",
+                 return_value=[0])
+    mocker.patch("usv_playpen.processing.das_inference.smart_wait")
+
+    fmv = FindMouseVocalizations(
+        root_directory=str(tmp_path),
+        input_parameter_dict=processing_settings,
+        message_output=lambda *_a, **_kw: None,
+    )
+    fmv.das_command_line_inference()
+
+    argv = popen_mock.call_args.kwargs["args"]
+    assert argv[:3] == [str(das_env / "bin" / "das"), "predict", str(hpss_dir / "ch1.wav")]
+    assert "conda" not in argv
 
 
 def test_summarize_das_findings_handles_no_annotations(processing_settings,

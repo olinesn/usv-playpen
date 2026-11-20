@@ -460,7 +460,8 @@ Process
 
     optional arguments:
       -h, --help            Show this help message and exit.
-      --env-name            Name of the DAS conda environment.
+      --env-name            Name of the DAS conda environment, or path of an
+                            environment folder (venv, conda prefix).
       --model-dir           Directory of the DAS model.
       --model-name          Base name of the DAS model.
       --output-type         Output file type for DAS predictions.
@@ -745,7 +746,8 @@ A segment with several squeaks is embedded once, over its one extent (their enve
     optional arguments:
       -h, --help            Show this help message and exit.
       --vcl-version         Version of Vocalocator to use ('vcl' or 'vcl-ssl').
-      --env-name            Name of the Vocalocator conda environment.
+      --env-name            Name of the Vocalocator conda environment, or path of an
+                            environment folder (venv, conda prefix).
       --model-dir           Directory of the Vocalocator model.
       --temperature         Covariance temperature scaling for the 6D confidence sets.
       --grid-resolution     Spatial (x_res, y_res) grid the confidence-set PDF is sampled on, e.g. --grid-resolution 100 100.
@@ -1824,15 +1826,17 @@ In order to exploit the full functionality of *usv-playpen*, one should install 
     $ git clone https://github.com/Aramist/vocalocator-ssl.git && cd vocalocator-ssl
     $ conda activate vcl-ssl && pip install -e .
 
-The shipped default ``vcl_conda_env_name`` is ``vcl-ssl-ss``, which uses the
-`separate-scorers <https://github.com/Aramist/vocalocator-ssl/tree/separate-scorers>`_
-branch of the same repository (this branch may become the default in the future). To
-set that environment up instead of (or alongside) ``vcl-ssl``:
+The shipped default ``vcl_conda_env_name`` is ``vcl-ssl-ss``. It is named after the
+``separate-scorers`` branch of the same repository, which was merged into ``main`` on
+24 August 2026 (`Aramist/vocalocator-ssl#10 <https://github.com/Aramist/vocalocator-ssl/pull/10>`_)
+and then deleted, so the environment is now built from ``main``. An environment cloned
+from ``main`` before that date has the older code; to set up ``vcl-ssl-ss`` instead of
+(or alongside) ``vcl-ssl``:
 
 .. code-block:: bash
 
     $ conda create --name vcl-ssl-ss python=3.10 torchaudio packaging -y
-    $ git clone -b separate-scorers https://github.com/Aramist/vocalocator-ssl.git vocalocator-ssl-ss && cd vocalocator-ssl-ss
+    $ git clone https://github.com/Aramist/vocalocator-ssl.git vocalocator-ssl-ss && cd vocalocator-ssl-ss
     $ conda activate vcl-ssl-ss && pip install -e .
 
 Having set up these environments, you can set up directories with bash scripts in /src/other/DAS, /src/other/HPSS, /src/other/SLEAP and /src/other/USV_PLAYPEN and run them to expedite your data processing or analysis.
