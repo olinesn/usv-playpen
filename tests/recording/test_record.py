@@ -13,8 +13,9 @@ successful and failing SMTP sends); check_ethernet_connection;
 purge_cup_connections_on_windows; remount_cup_drives_on_windows;
 verify_avisoft_is_recording; check_camera_vitals; conduct_tracking_calibration;
 modify_audio_file; conduct_behavioral_recording (orchestration with the
-built-in sync logger, CoolTerm kept on Windows, an unopenable sync port and the
-credential raise); and the conduct-calibration / conduct-recording CLIs.
+built-in sync logger, CoolTerm kept on Windows, an unopenable sync port, the sync
+capture stopped when Avisoft fails to start, and the credential raise); and the
+conduct-calibration / conduct-recording CLIs.
 """
 
 from __future__ import annotations
@@ -1138,6 +1139,72 @@ def test_conduct_behavioral_recording_refuses_unopenable_sync_port(mocker, monke
     with pytest.raises(RuntimeError, match='arduino_sync_port'):
         ec.conduct_behavioral_recording()
     vitals_mock.assert_not_called()
+
+
+def test_conduct_behavioral_recording_stops_sync_capture_when_avisoft_fails(mocker, monkeypatch,
+                                                                            full_recording_settings, tmp_path):
+    """When Avisoft Recorder produces no audio after launch, the recording is
+    aborted before the cameras start, and the built-in sync logger is stopped
+    (its port freed and its file closed) before Avisoft Recorder is ended.
+
+    Runs as Windows with the built-in logger opted into, so RECORDER takes its
+    native PowerShell start and stop."""
+    monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Windows')
+    full_recording_settings['conduct_audio_recording'] = True
+    full_recording_settings['timeouts'].update({'avisoft_warmup_s': 3, 'avisoft_poll_interval_s': 3, 'avisoft_max_wait_s': 12})
+    avisoft_config_dir = pathlib.Path(full_recording_settings['avisoft_config_directory'])
+    avisoft_config_dir.mkdir(parents=True)
+    (avisoft_config_dir / 'avisoft_config.ini').write_text('[Configuration]\n')
+
+    for method_name in ('check_ethernet_connection', 'purge_cup_connections_on_windows', 'modify_audio_file'):
+        monkeypatch.setattr(ExperimentController, method_name, lambda _self, *_a, **_kw: None)
+    monkeypatch.setattr(ExperimentController, 'verify_avisoft_is_recording', lambda _self, **_kw: False)
+
+    fake_api = MagicMock()
+    fake_api.call.side_effect = lambda endpoint, **_kw: (
+        {'now': 1_700_000_000.0} if endpoint == 'schedule' else MagicMock()
+    )
+
+    def _vitals(self, **_kwargs):
+        """Stand in for check_camera_vitals: attach the fake Motif API and one camera serial."""
+        self.api = fake_api
+        self.camera_serial_num = ['SN12345']
+    monkeypatch.setattr(ExperimentController, 'check_camera_vitals', _vitals)
+    monkeypatch.setattr(ExperimentController, 'get_custom_dir_names',
+                        lambda _self, **_kwargs: ('00:00:00', [str(tmp_path / 'lin_dest')],
+                                                [str(tmp_path / 'win_dest')], 'sess'))
+    mocker.patch('usv_playpen.recording.behavioral_experiments.smart_wait')
+    mocker.patch('usv_playpen.recording.behavioral_experiments.Messenger')
+
+    # one list for both stops, in the order they happen
+    events = []
+    real_stop_sync_capture = ExperimentController.stop_sync_capture
+
+    def _stop_sync_capture(self):
+        """Stop the sync capture for real, then note that it happened."""
+        real_stop_sync_capture(self)
+        events.append('sync capture stopped')
+    monkeypatch.setattr(ExperimentController, 'stop_sync_capture', _stop_sync_capture)
+
+    def _popen(*args, **kwargs):
+        """Stand in for subprocess.Popen: note when Avisoft Recorder is ended."""
+        command = kwargs['args'] if 'args' in kwargs else args[0]
+        if "Stop-Process -Name 'rec_usgh.exe'" in str(command):
+            events.append('Avisoft stopped')
+        return MagicMock()
+    mocker.patch('usv_playpen.recording.behavioral_experiments.subprocess.Popen', side_effect=_popen)
+
+    ec = ExperimentController(exp_settings_dict=full_recording_settings,
+                              metadata_settings={'Session': {}, 'Environment': {}})
+    with pytest.raises(RuntimeError, match='Aborted experiment: Avisoft Recorder did not produce audio bytes after launch'):
+        ec.conduct_behavioral_recording()
+
+    assert ec.sync_logger == 'builtin'
+    assert events == ['sync capture stopped', 'Avisoft stopped']
+    assert ec.sync_serial_logger is None
+    # the capture file was closed in the Data folder; the cameras never started
+    assert len(list((tmp_path / 'coolterm' / 'Data').glob('CoolTerm Capture (usv-playpen) *.txt'))) == 1
+    assert not any('recording/start' in str(call) for call in fake_api.call.call_args_list)
 
 
 def test_conduct_behavioral_recording_raises_not_exits_on_bad_credentials(mocker, monkeypatch,
