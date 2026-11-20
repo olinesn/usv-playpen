@@ -86,7 +86,7 @@ models) run on the CPU. To use the AMD GPU, build a second environment,
 ROCm:
 
 ```bash
-bash scripts/setup_rocm_venv.sh
+bash src/usv_playpen/other/rocm/setup_rocm_venv.sh
 echo 'alias activate-pni="source /path/.../usv-playpen/.venv-rocm/bin/activate && export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1"' >> ~/.bashrc
 source ~/.bashrc
 activate-pni
@@ -95,8 +95,11 @@ activate-pni
 Run the script again instead of `uv sync` after every `git pull` or version
 checkout, and run commands (`usv-playpen`, `pytest`, the CLI tools) from the
 activated environment rather than through `uv run`, which uses `.venv`.
-PyTorch's ROCm build brings its own ROCm libraries. JAX stays on the CPU, as
-after `uv sync`; `USV_PLAYPEN_JAX_ROCM=1 bash scripts/setup_rocm_venv.sh` also
+PyTorch's ROCm build brings its own ROCm libraries, so PyTorch needs no system
+ROCm installation.
+
+JAX stays on the CPU, as after `uv sync`.
+`USV_PLAYPEN_JAX_ROCM=1 bash src/usv_playpen/other/rocm/setup_rocm_venv.sh` also
 installs JAX's ROCm plugin, which needs ROCm 7 under `/opt/rocm` and works in a
 process only if `torch` is imported before `jax` (see the script's header).
 
@@ -104,7 +107,8 @@ DAS and Vocalocator run in environments of their own. To run them on the AMD
 GPU, build those with PyTorch's ROCm build too, and give usv-playpen their
 folders instead of conda environment names (`das_conda_env_name` and
 `vcl_conda_env_name` in `processing_settings.json`, or `--env-name` on the
-command line; a value with a `/` is taken as a folder):
+command line; a value that contains `/` or `\`, or starts with `~`, is taken as
+a folder):
 
 ```bash
 rocm=https://download.pytorch.org/whl/rocm7.2

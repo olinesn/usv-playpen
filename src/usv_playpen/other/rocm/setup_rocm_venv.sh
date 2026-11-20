@@ -28,7 +28,7 @@
 # ROCm environment goes to .venv-rocm next to it (or the folder given as the
 # first argument). Use it by activating it and running the commands directly:
 #
-#   bash scripts/setup_rocm_venv.sh                # build or update .venv-rocm
+#   bash src/usv_playpen/other/rocm/setup_rocm_venv.sh   # build or update .venv-rocm
 #   source .venv-rocm/bin/activate && usv-playpen
 #   source .venv-rocm/bin/activate && pytest -n 8
 #
@@ -37,7 +37,8 @@
 # bring .venv-rocm in line with the new uv.lock.
 #
 # Arguments after the folder are passed to `uv export` to choose dependency
-# groups, e.g. `bash scripts/setup_rocm_venv.sh .venv-rocm --all-groups`
+# groups, e.g.
+# `bash src/usv_playpen/other/rocm/setup_rocm_venv.sh .venv-rocm --all-groups`
 # (default: the `dev` group, as `uv sync`).
 #
 # Environment:
@@ -56,7 +57,12 @@ if ! command -v uv > /dev/null 2>&1; then
     exit 1
 fi
 
-repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# This script sits in <repo>/src/usv_playpen/other/rocm/.
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+if [[ ! -f "${repo_dir}/pyproject.toml" || ! -f "${repo_dir}/uv.lock" ]]; then
+    echo "Run this script from a usv-playpen checkout (no pyproject.toml / uv.lock in ${repo_dir})." >&2
+    exit 1
+fi
 venv_dir="${1:-${repo_dir}/.venv-rocm}"
 shift || true
 rocm_index="${USV_PLAYPEN_ROCM_INDEX:-https://download.pytorch.org/whl/rocm7.2}"

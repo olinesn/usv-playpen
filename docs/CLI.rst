@@ -461,7 +461,8 @@ Process
     optional arguments:
       -h, --help            Show this help message and exit.
       --env-name            Name of the DAS conda environment, or path of an
-                            environment folder (venv, conda prefix).
+                            environment folder (venv, conda prefix) to run DAS
+                            from without conda.
       --model-dir           Directory of the DAS model.
       --model-name          Base name of the DAS model.
       --output-type         Output file type for DAS predictions.
@@ -747,7 +748,8 @@ A segment with several squeaks is embedded once, over its one extent (their enve
       -h, --help            Show this help message and exit.
       --vcl-version         Version of Vocalocator to use ('vcl' or 'vcl-ssl').
       --env-name            Name of the Vocalocator conda environment, or path of an
-                            environment folder (venv, conda prefix).
+                            environment folder (venv, conda prefix) to run it
+                            from without conda.
       --model-dir           Directory of the Vocalocator model.
       --temperature         Covariance temperature scaling for the 6D confidence sets.
       --grid-resolution     Spatial (x_res, y_res) grid the confidence-set PDF is sampled on, e.g. --grid-resolution 100 100.
@@ -1838,5 +1840,11 @@ from ``main`` before that date has the older code; to set up ``vcl-ssl-ss`` inst
     $ conda create --name vcl-ssl-ss python=3.10 torchaudio packaging -y
     $ git clone https://github.com/Aramist/vocalocator-ssl.git vocalocator-ssl-ss && cd vocalocator-ssl-ss
     $ conda activate vcl-ssl-ss && pip install -e .
+
+Instead of a conda environment name, ``das_conda_env_name`` and ``vcl_conda_env_name``
+(``--env-name`` on the command line) also take the path of an environment folder, such as
+a uv environment, whose own ``das`` or ``python`` is then run without conda. That is how
+DAS and Vocalocator are set up to run on an AMD GPU under Linux; the README's *Linux with
+an AMD GPU (ROCm)* section has the commands.
 
 Having set up these environments, you can set up directories with bash scripts in /src/other/DAS, /src/other/HPSS, /src/other/SLEAP and /src/other/USV_PLAYPEN and run them to expedite your data processing or analysis.

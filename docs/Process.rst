@@ -2189,7 +2189,7 @@ The */usv-playpen/_parameter_settings/processing_settings.json* file contains a 
      - Options
    * - :ref:`das_conda_env_name <proc-das-command-line-inference-das-conda-env-name>`
      - ``"das"``
-     - any conda environment name
+     - any conda environment name, or the path of an environment folder
    * - :ref:`das_model_directory <proc-das-command-line-inference-das-model-directory>`
      - path (see JSON above)
      - path to a directory
@@ -2924,7 +2924,7 @@ The */usv-playpen/_parameter_settings/processing_settings.json* file contains a 
      - ``"ultrasonic"``, ``"broadband"``
    * - :ref:`vcl_conda_env_name <proc-vocalocator-vcl-conda-env-name>`
      - ``"vcl-ssl-ss"``
-     - any conda environment name
+     - any conda environment name, or the path of an environment folder
    * - :ref:`vcl_model_directory <proc-vocalocator-vcl-model-directory>`
      - path (see JSON above)
      - path to a directory
