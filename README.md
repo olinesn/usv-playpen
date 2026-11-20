@@ -87,7 +87,7 @@ ROCm:
 
 ```bash
 bash scripts/setup_rocm_venv.sh
-echo 'alias activate-pni="source /path/.../usv-playpen/.venv-rocm/bin/activate"' >> ~/.bashrc
+echo 'alias activate-pni="source /path/.../usv-playpen/.venv-rocm/bin/activate && export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1"' >> ~/.bashrc
 source ~/.bashrc
 activate-pni
 ```
@@ -120,6 +120,12 @@ uv pip install --python ~/envs/vcl-rocm/bin/python -e ~/envs/vocalocator-ssl
 
 DAS 0.33 runs on Keras 3 with PyTorch and reads models trained with the
 TensorFlow versions (0.32 and earlier).
+
+The `export` in the alias above turns on PyTorch's experimental attention
+kernels for AMD GPUs (`TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1`), and
+usv-playpen passes it on to Vocalocator. Without it, Vocalocator is no faster on
+the GPU than on the CPU. On a Radeon 8060S, a session of 932 vocalizations took
+33 s without it and 21 s with it, with the same assignments.
 
 ### Updating to a specific version
 
