@@ -257,11 +257,16 @@ def test_wine_windows_path_refuses_relative_path():
 
 @posix_only
 def test_process_command_name_names_a_live_process_and_none_for_a_gone_one():
-    """ps names this test's own interpreter; a process that has exited has no name."""
-    assert 'python' in (process_command_name(os.getpid()) or '').lower()
-    finished = subprocess.Popen([sys.executable, '-c', 'pass'])
-    finished.wait()
-    assert process_command_name(finished.pid) is None
+    """ps names a running program by its file name; a process that has exited has no name."""
+    # a program of known name: pytest's own process is named python or pytest,
+    # depending on how pytest was started
+    sleeper = subprocess.Popen(['sleep', '30'])
+    try:
+        assert process_command_name(sleeper.pid) == 'sleep'
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+    assert process_command_name(sleeper.pid) is None
 
 
 def test_wait_for_free_port_reports_taken_and_free():
