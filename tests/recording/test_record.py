@@ -868,7 +868,9 @@ def _realistic_audio_settings():
 
 def test_modify_audio_file_writes_destination(monkeypatch, tmp_path, mocker):
     """modify_audio_file should produce a valid avisoft_config.ini at the
-    destination directory without crashing on the realistic settings dict."""
+    destination directory without crashing on the realistic settings dict.
+    Runs as on Windows, where the local paths go into the ini unchanged."""
+    monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Windows')
     fake_module_dir = _seed_avisoft_config(tmp_path)
     monkeypatch.setattr(be_mod, '__file__', str(fake_module_dir / 'behavioral_experiments.py'))
 
@@ -897,7 +899,9 @@ def test_modify_audio_file_writes_destination(monkeypatch, tmp_path, mocker):
 
 def test_modify_audio_file_idempotent_on_second_run(monkeypatch, tmp_path, mocker):
     """Running modify_audio_file twice with identical settings should result
-    in no further changes on the second run (changes counter stays at 0)."""
+    in no further changes on the second run (changes counter stays at 0).
+    Runs as on Windows; the Wine counterpart is below."""
+    monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Windows')
     fake_module_dir = _seed_avisoft_config(tmp_path)
     monkeypatch.setattr(be_mod, '__file__', str(fake_module_dir / 'behavioral_experiments.py'))
 
@@ -920,6 +924,229 @@ def test_modify_audio_file_idempotent_on_second_run(monkeypatch, tmp_path, mocke
     # On the second pass the message "N lines changed" should NOT be emitted
     # because the file was already in the desired state.
     assert not any('lines changed' in m for m in out_messages)
+
+
+def test_modify_audio_file_under_wine_writes_windows_paths(monkeypatch, tmp_path, mocker):
+    """Under Wine the ini gets the paths as RECORDER sees them: the base directory
+    through Z: and the config file through C: (it is inside the prefix's drive_c).
+    The config directory is created if a fresh prefix lacks it, and a second run
+    changes nothing."""
+    monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Linux')
+    fake_module_dir = _seed_avisoft_config(tmp_path)
+    monkeypatch.setattr(be_mod, '__file__', str(fake_module_dir / 'behavioral_experiments.py'))
+
+    prefix = tmp_path / 'wine-avisoft'
+    config_dir = prefix / 'drive_c' / 'users' / 'rig' / 'Documents' / 'Avisoft Bioacoustics' / 'Configurations' / 'RECORDER_USGH'
+    settings = _realistic_audio_settings()
+    assert settings['avisoft_runner'] == 'auto'
+    settings['avisoft_wine_prefix'] = str(prefix)
+    settings['avisoft_basedirectory'] = str(tmp_path / 'avisoft_base')
+    settings['avisoft_config_directory'] = str(config_dir)
+    settings['video_session_duration'] = 5
+
+    mocker.patch('usv_playpen.recording.behavioral_experiments.smart_wait')
+    out_messages = []
+    ec = ExperimentController(exp_settings_dict=settings, message_output=out_messages.append)
+    ec.modify_audio_file()
+
+    parsed = configparser.ConfigParser()
+    parsed.read(config_dir / 'avisoft_config.ini')
+    base_windows = 'Z:' + str(tmp_path / 'avisoft_base').replace('/', '\\')
+    assert parsed['Configuration']['basedirectory'] == base_windows + '\\'
+    config_windows = ('C:\\users\\rig\\Documents\\Avisoft Bioacoustics\\Configurations'
+                      '\\RECORDER_USGH\\avisoft_config.ini')
+    assert parsed['Configuration']['configfilename'] == config_windows
+    assert parsed['Info']['configfilename'] == config_windows
+
+    out_messages.clear()
+    ec.modify_audio_file()
+    assert not any('lines changed' in m for m in out_messages)
+
+
+@pytest.mark.parametrize(('system', 'expected'), [('Windows', 'native'), ('Linux', 'wine'), ('Darwin', 'wine')])
+def test_avisoft_runner_defaults_to_auto_when_the_setting_is_missing(monkeypatch, controller, system, expected):
+    """A settings file from before avisoft_runner existed behaves as 'auto'."""
+    monkeypatch.setattr(be_mod.platform, 'system', lambda: system)
+    assert 'avisoft_runner' not in controller.exp_settings_dict
+    assert controller.avisoft_runner() == expected
+
+
+def test_count_last_dropouts_reads_a_log_written_under_wine(tmp_path):
+    """Under Wine, RECORDER heads each session of chN.log with the Windows form of
+    the channel directory (CRLF line ends, tab-separated entries); the last
+    session is found by that text."""
+    base = tmp_path / 'avisoft'
+    ch_dir = base / 'ch1'
+    ch_dir.mkdir(parents=True)
+    header = 'Z:\\data\\avisoft\\ch1\\'
+    log = (
+        f"\r\n\r\n{header}\r\n"
+        "11/19/26\t07:03:02.333\tMonitoring_started\r\n"
+        "11/19/26\t07:03:02.400\tdropout\r\n"
+        "11/19/26\t07:03:02.500\tdropout\r\n"
+        f"\r\n{header}\r\n"
+        "11/19/26\t07:04:48.877\tMonitoring_started\r\n"
+        "11/19/26\t07:04:49.047\tdropout\r\n"
+    )
+    (ch_dir / 'ch1.log').write_bytes(log.encode('cp1252'))
+    assert count_last_recording_dropouts(str(base), 'ch1', log_directory_text=header) == 1
+    # read with the local path, as on Windows, nothing splits and every dropout counts
+    assert count_last_recording_dropouts(str(base), 'ch1') == 3
+
+
+def _audio_recording_settings(full_recording_settings):
+    """full_recording_settings with audio on and the Avisoft config in place, as after modify_audio_file."""
+    settings = full_recording_settings
+    settings['conduct_audio_recording'] = True
+    # add to the fixture's timeouts rather than replacing them, so timeouts other steps read stay set
+    settings.setdefault('timeouts', {}).update({'avisoft_warmup_s': 3, 'avisoft_poll_interval_s': 3, 'avisoft_max_wait_s': 12,
+                                                'audio_move_timeout_min': 15, 'backup_mirror_timeout_hours': 2})
+    config_dir = pathlib.Path(settings['avisoft_config_directory'])
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / 'avisoft_config.ini').write_text('[Configuration]\n')
+    return settings
+
+
+def _patch_recording_dependencies(monkeypatch, mocker, tmp_path, *, verify_result):
+    """Mocks every subordinate step of conduct_behavioral_recording except the Avisoft launch."""
+    for method_name in ('check_ethernet_connection', 'purge_cup_connections_on_windows',
+                        'modify_audio_file', 'remount_cup_drives_on_windows'):
+        monkeypatch.setattr(ExperimentController, method_name, lambda _self, *_a, **_kw: None)
+    monkeypatch.setattr(ExperimentController, 'verify_avisoft_is_recording', lambda _self, **_kw: verify_result)
+    fake_api = MagicMock()
+    fake_api.call.side_effect = lambda endpoint, **_kw: {'now': 1_700_000_000.0} if endpoint == 'schedule' else MagicMock()
+    fake_api.is_copying.return_value = False
+
+    def _vitals(self, **_kwargs):
+        """Stand in for check_camera_vitals: attach the fake Motif API and one camera serial."""
+        self.api = fake_api
+        self.camera_serial_num = ['SN12345']
+
+    monkeypatch.setattr(ExperimentController, 'check_camera_vitals', _vitals)
+    monkeypatch.setattr(ExperimentController, 'get_custom_dir_names',
+                        lambda _self, **_kwargs: ('00:00:00', [str(tmp_path / 'lin_dest')],
+                                                  [str(tmp_path / 'win_dest')], 'sess'))
+    mocker.patch('usv_playpen.recording.behavioral_experiments.smart_wait')
+    mocker.patch('usv_playpen.recording.behavioral_experiments.Messenger')
+    return mocker.patch('usv_playpen.recording.behavioral_experiments.subprocess.Popen')
+
+
+def test_windows_avisoft_launch_and_abort_are_unchanged(mocker, monkeypatch, full_recording_settings, tmp_path):
+    """On Windows, RECORDER is started with the same PowerShell command as before,
+    and a failed health check ends it with the same command, raising the same
+    error. (How the sync logger is started and ended is not checked here.)"""
+    monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Windows')
+    settings = _audio_recording_settings(full_recording_settings)
+    settings['audio']['cpu_priority'] = 'High'
+    settings['audio']['cpu_affinity'] = [2, 3]
+    popen = _patch_recording_dependencies(monkeypatch, mocker, tmp_path, verify_result=False)
+
+    ec = ExperimentController(exp_settings_dict=settings, metadata_settings={'Session': {}, 'Environment': {}})
+    with pytest.raises(RuntimeError, match=r'^Aborted experiment: Avisoft Recorder did not produce audio bytes after launch\.$'):
+        ec.conduct_behavioral_recording()
+
+    commands = [call.kwargs['args'] if 'args' in call.kwargs else call.args[0] for call in popen.call_args_list]
+    launch = ('powershell -Command "Start-Process -FilePath \'rec_usgh.exe\' -ArgumentList \'/CFG=avisoft_config.ini\', \'/AUT\' '
+              '-Verb RunAs; Start-Sleep 2; $proc = Get-Process \'rec_usgh\' -ErrorAction SilentlyContinue; if ($proc) { '
+              '$proc.PriorityClass = \'High\'; $proc.ProcessorAffinity =  /affinity 0xC; }"')
+    assert [command for command in commands if 'rec_usgh' in str(command)] == [
+        launch,
+        ['powershell', '-Command', "Stop-Process -Name 'rec_usgh.exe' -Force -ErrorAction SilentlyContinue"],
+    ]
+    assert ec.avisoft_wine is None
+
+
+def test_wine_avisoft_start_failure_aborts_with_its_reason(mocker, monkeypatch, full_recording_settings, tmp_path):
+    """Under Wine, a RECORDER that cannot be started aborts the recording before
+    the cameras start, with the reason, and stops RECORDER."""
+    monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Linux')
+    settings = _audio_recording_settings(full_recording_settings)
+    _patch_recording_dependencies(monkeypatch, mocker, tmp_path, verify_result=True)
+    monkeypatch.setattr(ExperimentController, 'start_avisoft_recorder_under_wine',
+                        lambda _self: "Cannot start RECORDER USGH under Wine: no Wine prefix at '/nowhere'; check avisoft_wine_prefix.")
+    stops = []
+    monkeypatch.setattr(ExperimentController, 'stop_avisoft_recorder',
+                        lambda _self, after_failure=False: stops.append(after_failure))
+
+    ec = ExperimentController(exp_settings_dict=settings, metadata_settings={'Session': {}, 'Environment': {}})
+    with pytest.raises(RuntimeError, match=r'^Aborted experiment: Cannot start RECORDER USGH under Wine: no Wine prefix'):
+        ec.conduct_behavioral_recording()
+    assert stops == [True]
+    assert not any('recording/start' in str(call) for call in ec.api.call.call_args_list)
+
+
+def test_wine_avisoft_is_stopped_after_the_recording(mocker, monkeypatch, full_recording_settings, tmp_path):
+    """Under Wine, RECORDER and the helper are stopped once the recording time is
+    up, and the dropouts are counted from the log in its Windows-path form."""
+    monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Linux')
+    settings = _audio_recording_settings(full_recording_settings)
+    settings['avisoft_wine_prefix'] = str(tmp_path / 'wine-avisoft')
+    _patch_recording_dependencies(monkeypatch, mocker, tmp_path, verify_result=True)
+    fake_wine = MagicMock()
+    fake_wine.stop.return_value = []
+    fake_wine.message_boxes.return_value = []
+
+    def _start(self):
+        """Stand in for the Wine start: attach the fake recorder."""
+        self.avisoft_wine = fake_wine
+
+    monkeypatch.setattr(ExperimentController, 'start_avisoft_recorder_under_wine', _start)
+    dropout_calls = []
+    monkeypatch.setattr(be_mod, 'count_last_recording_dropouts',
+                        lambda **kwargs: dropout_calls.append(kwargs) or 0)
+
+    ec = ExperimentController(exp_settings_dict=settings, metadata_settings={'Session': {}, 'Environment': {}})
+    ec.conduct_behavioral_recording()
+
+    fake_wine.stop.assert_called_once_with(close_max_wait_s=10)
+    assert ec.avisoft_wine is None
+    base_windows = 'Z:' + settings['avisoft_basedirectory'].replace('/', '\\')
+    assert [call['log_directory_text'] for call in dropout_calls] == [f"{base_windows}\\ch1\\", f"{base_windows}\\ch13\\"]
+
+
+def test_stop_avisoft_recorder_under_wine_reports(monkeypatch, controller):
+    """Stopping under Wine reports what happened, what RECORDER showed, and after a failure the helper's log."""
+    monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Linux')
+    controller.exp_settings_dict['timeouts']['avisoft_close_max_wait_s'] = 4
+    messages = []
+    controller.message_output = messages.append
+    fake_wine = MagicMock()
+    fake_wine.stop.return_value = ['RECORDER USGH did not close within 4 s of being asked; it was ended.']
+    fake_wine.message_boxes.return_value = ['UltraSoundGate hardware not found!']
+    fake_wine.log_tail.return_value = 'open 0547:1012 #0 failed: Access denied'
+    fake_wine.helper_log_path = pathlib.Path('/data/avisoft/usbio-helper.log')
+    controller.avisoft_wine = fake_wine
+
+    controller.stop_avisoft_recorder(after_failure=True)
+
+    fake_wine.stop.assert_called_once_with(close_max_wait_s=4)
+    assert messages == [
+        '[**Avisoft under Wine**] RECORDER USGH did not close within 4 s of being asked; it was ended.',
+        '[**Avisoft under Wine**] RECORDER USGH showed: UltraSoundGate hardware not found!',
+        f"[**Avisoft under Wine**] End of {fake_wine.helper_log_path}:\nopen 0547:1012 #0 failed: Access denied",
+    ]
+    assert controller.avisoft_wine is None
+    # nothing running: nothing to do
+    controller.stop_avisoft_recorder()
+    assert len(messages) == 3
+
+
+def test_start_avisoft_recorder_under_wine_reports_a_missing_installation(monkeypatch, controller, tmp_path):
+    """A missing piece of the Wine installation comes back as the start error, not as an exception."""
+    monkeypatch.setattr(be_mod.platform, 'system', lambda: 'Linux')
+    controller.exp_settings_dict.update({
+        'avisoft_wine_binary': str(tmp_path / 'no-wine'),
+        'avisoft_wine_prefix': str(tmp_path / 'prefix'),
+        'avisoft_recorder_exe_directory': str(tmp_path),
+        'avisoft_recorder_program_name': 'rec_usgh.exe',
+        'avisoft_usbio_shim_directory': str(tmp_path),
+        'avisoft_usbio_port': 47321,
+        'avisoft_usbio_device_order': [],
+        'avisoft_basedirectory': str(tmp_path / 'avisoft'),
+    })
+    error = controller.start_avisoft_recorder_under_wine()
+    assert error is not None
+    assert 'avisoft_wine_binary' in error
 
 
 # conduct_behavioral_recording (full orchestration)
